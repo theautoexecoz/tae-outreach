@@ -26,3 +26,4 @@ from outreach.discover import mazda  # noqa: F401, E402
 from outreach.discover import hyundai  # noqa: F401, E402
 from outreach.discover import subaru  # noqa: F401, E402
 from outreach.discover import nissan  # noqa: F401, E402
+from outreach.discover import isuzu  # noqa: F401, E402
