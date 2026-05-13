@@ -32,3 +32,12 @@ from outreach.discover import kia  # noqa: F401, E402
 from outreach.discover import bmw  # noqa: F401, E402
 from outreach.discover import mercedes  # noqa: F401, E402
 from outreach.discover import ldv  # noqa: F401, E402
+from outreach.discover import ford  # noqa: F401, E402
+from outreach.discover import volkswagen  # noqa: F401, E402
+from outreach.discover import jeep  # noqa: F401, E402
+from outreach.discover import byd  # noqa: F401, E402
+from outreach.discover import volvo  # noqa: F401, E402
+from outreach.discover import audi  # noqa: F401, E402
+from outreach.discover import gwm  # noqa: F401, E402
+from outreach.discover import mg  # noqa: F401, E402
+from outreach.discover import honda  # noqa: F401, E402
