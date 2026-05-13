@@ -1,0 +1,24 @@
+import logging
+
+log = logging.getLogger("outreach.discover")
+
+BRAND_MODULES = {}
+
+
+def register(slug):
+    def decorator(fn):
+        BRAND_MODULES[slug] = fn
+        return fn
+    return decorator
+
+
+def run_discovery(brand_slug: str, limit: int = 0):
+    if brand_slug not in BRAND_MODULES:
+        log.warning("no discovery module for %s yet", brand_slug)
+        return 0
+    fn = BRAND_MODULES[brand_slug]
+    return fn(limit=limit)
+
+
+# Import brand modules to trigger registration
+from outreach.discover import toyota  # noqa: F401, E402
