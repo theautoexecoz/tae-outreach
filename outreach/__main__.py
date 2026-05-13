@@ -12,6 +12,8 @@ log = logging.getLogger("outreach")
 BRANDS = [
     "toyota", "mitsubishi", "hyundai", "kia", "ford",
     "mazda", "nissan", "isuzu", "honda", "subaru",
+    "bmw", "mercedes", "ldv", "volkswagen", "audi",
+    "volvo", "jeep", "mg", "byd", "gwm",
 ]
 
 
