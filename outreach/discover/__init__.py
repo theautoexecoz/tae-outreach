@@ -22,3 +22,4 @@ def run_discovery(brand_slug: str, limit: int = 0):
 
 # Import brand modules to trigger registration
 from outreach.discover import toyota  # noqa: F401, E402
+from outreach.discover import mazda  # noqa: F401, E402
