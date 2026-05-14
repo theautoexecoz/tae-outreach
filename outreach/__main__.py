@@ -37,6 +37,11 @@ def cmd_extract(args):
     run_extraction(brand=args.brand, limit=args.limit)
 
 
+def cmd_apply_patterns(args):
+    from outreach.extract import run_apply_patterns
+    run_apply_patterns()
+
+
 def cmd_stats(args):
     from outreach.db import get_conn
     with get_conn() as conn:
@@ -102,6 +107,8 @@ def main():
     p_extract.add_argument("--brand")
     p_extract.add_argument("--limit", type=int, default=0)
 
+    sub.add_parser("apply-patterns", help="retrospective cross-dealer email pattern pass")
+
     sub.add_parser("stats", help="show pipeline statistics")
     sub.add_parser("migrate", help="run database migrations")
 
@@ -117,6 +124,7 @@ def main():
         "discover": cmd_discover,
         "scrape": cmd_scrape,
         "extract": cmd_extract,
+        "apply-patterns": cmd_apply_patterns,
         "stats": cmd_stats,
         "migrate": cmd_migrate,
         "export": cmd_export,
