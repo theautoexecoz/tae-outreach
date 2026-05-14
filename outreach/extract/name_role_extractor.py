@@ -200,7 +200,7 @@ def extract_people(html: str) -> list[dict]:
         if not any(kw in classes.lower() for kw in CARD_CLASS_KEYWORDS):
             continue
 
-        headings = container.find_all(["h2", "h3", "h4", "h5", "strong"])
+        headings = container.find_all(["h2", "h3", "h4", "h5", "strong", "b"])
         for heading in headings:
             name = heading.get_text(strip=True)
             if not _looks_like_name(name):

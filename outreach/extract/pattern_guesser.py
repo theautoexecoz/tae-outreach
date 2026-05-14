@@ -72,8 +72,8 @@ def guess_email(first_name: str, last_name: str | None, domain: str, pattern: st
     first = first_name.lower().strip()
     last = (last_name or "").lower().strip()
     # Remove hyphens/apostrophes from names for email generation
-    first = first.replace("'", "").replace("-", "")
-    last = last.replace("'", "").replace("-", "")
+    first = first.replace("'", "").replace("-", "").replace(" ", "")
+    last = last.replace("'", "").replace("-", "").replace(" ", "")
 
     if not first:
         return None
