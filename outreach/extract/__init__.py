@@ -371,3 +371,85 @@ def run_apply_patterns():
         "retrospective patterns: %d email domains processed, %d contacts updated",
         len(domains_processed), updated,
     )
+
+
+DEPARTMENT_LABELS = {
+    "new sales", "used sales", "new & used sales", "new/used sales",
+    "new and used sales", "pre owned sales", "pre-owned sales",
+    "premium used cars", "certified pre-owned",
+    "new car sales", "used car sales",
+    "customer relations", "customer experience", "customer care",
+    "the team", "our team", "meet the team", "team",
+    "service & parts", "service & bodyshop", "service and parts",
+    "parts & accessories", "parts and accessories",
+    "finance, insurance & aftercare", "finance & insurance",
+    "finance, insurance & car care", "finance and insurance",
+    "sales department", "service department", "parts department",
+    "sales team", "service team", "parts team", "admin team",
+    "workshop", "bodyshop", "body shop",
+    "fleet sales", "fleet department",
+    "wholesale", "wholesale department",
+    "enquiry form", "contact us", "contact form", "get in touch",
+    "friendly staff", "our staff", "meet our staff",
+    "sales manager", "service manager", "parts manager",
+    "finance manager", "business manager", "general manager",
+    "dealer principal", "sales consultant", "sales executive",
+    "sales advisor", "service advisor", "service consultant",
+    "parts interpreter", "receptionist",
+    "graphic designer", "marketing coordinator",
+    "account manager", "brand manager", "digital manager",
+    "marketing manager", "operations manager",
+    "administration manager", "administration clerk",
+    "administrative assistant", "assistant accountant",
+    "assistant sales manager", "assistant service manager",
+    "brand and communications manager",
+    "marketing and e-commerce coordinator",
+    "fixed operations manager",
+}
+
+DEPARTMENT_PATTERNS = [
+    r"^(new|used|pre[- ]?owned|certified|premium)\s+(car\s+)?sales?$",
+    r"^(sales|service|parts|finance|fleet|admin|workshop)\s+(team|department)$",
+    r"^(service|parts)\s*[&+]\s*(parts|bodyshop|accessories|service)$",
+    r"^finance[,\s]*(insurance|aftercare|car care)",
+    r"^customer\s+(relations|experience|care|service)$",
+    r"^(the|our|meet the)\s+team$",
+    r"^enquiry\s+(form|now)$",
+    r"^contact\s+(us|form|dealer)$",
+    r"^(friendly|our|meet our)\s+staff$",
+]
+
+
+def run_cleanup():
+    """Remove contacts that are department labels rather than people.
+
+    Targets contacts with no email whose full_name matches known department
+    label patterns. These come from card-based extraction where the card
+    container has team CSS classes but the 'name' heading is a department.
+    """
+    import re
+    log.info("running department label cleanup")
+
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT id, full_name FROM contacts WHERE email IS NULL"
+        )
+        rows = cur.fetchall()
+
+    removed = 0
+    with get_conn() as conn:
+        for row in rows:
+            name_lower = row["full_name"].strip().lower()
+
+            is_dept = name_lower in DEPARTMENT_LABELS
+            if not is_dept:
+                for pattern in DEPARTMENT_PATTERNS:
+                    if re.match(pattern, name_lower):
+                        is_dept = True
+                        break
+
+            if is_dept:
+                conn.execute("DELETE FROM contacts WHERE id = %s", (row["id"],))
+                removed += 1
+
+    log.info("cleanup: removed %d department label contacts", removed)

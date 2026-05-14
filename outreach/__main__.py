@@ -42,6 +42,11 @@ def cmd_apply_patterns(args):
     run_apply_patterns()
 
 
+def cmd_cleanup(args):
+    from outreach.extract import run_cleanup
+    run_cleanup()
+
+
 def cmd_stats(args):
     from outreach.db import get_conn
     with get_conn() as conn:
@@ -108,6 +113,7 @@ def main():
     p_extract.add_argument("--limit", type=int, default=0)
 
     sub.add_parser("apply-patterns", help="retrospective cross-dealer email pattern pass")
+    sub.add_parser("cleanup", help="remove department label contacts (no-email junk)")
 
     sub.add_parser("stats", help="show pipeline statistics")
     sub.add_parser("migrate", help="run database migrations")
@@ -125,6 +131,7 @@ def main():
         "scrape": cmd_scrape,
         "extract": cmd_extract,
         "apply-patterns": cmd_apply_patterns,
+        "cleanup": cmd_cleanup,
         "stats": cmd_stats,
         "migrate": cmd_migrate,
         "export": cmd_export,
