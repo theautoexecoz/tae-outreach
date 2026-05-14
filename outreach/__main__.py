@@ -32,6 +32,11 @@ def cmd_scrape(args):
     scrape_team_pages(brand=args.brand, limit=args.limit)
 
 
+def cmd_rescrape(args):
+    from outreach.scrape.team_page_scraper import rescrape_empty_mailtos
+    rescrape_empty_mailtos(brand=args.brand, limit=args.limit)
+
+
 def cmd_extract(args):
     from outreach.extract import run_extraction
     run_extraction(brand=args.brand, limit=args.limit)
@@ -108,6 +113,10 @@ def main():
     p_scrape.add_argument("--brand")
     p_scrape.add_argument("--limit", type=int, default=0)
 
+    p_rescrape = sub.add_parser("rescrape", help="re-scrape pages with empty mailto links via playwright")
+    p_rescrape.add_argument("--brand")
+    p_rescrape.add_argument("--limit", type=int, default=0)
+
     p_extract = sub.add_parser("extract", help="extract contacts from scraped HTML")
     p_extract.add_argument("--brand")
     p_extract.add_argument("--limit", type=int, default=0)
@@ -129,6 +138,7 @@ def main():
     handlers = {
         "discover": cmd_discover,
         "scrape": cmd_scrape,
+        "rescrape": cmd_rescrape,
         "extract": cmd_extract,
         "apply-patterns": cmd_apply_patterns,
         "cleanup": cmd_cleanup,
