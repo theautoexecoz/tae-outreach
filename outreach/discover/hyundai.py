@@ -46,14 +46,16 @@ def discover_hyundai(limit: int = 0) -> int:
             address = (d.get("streetName") or "").strip() or None
             postcode = (d.get("postcode") or "").strip() or None
             phone = (d.get("phone") or "").strip() or None
+            api_email = (d.get("email") or "").strip().lower() or None
 
             cur = conn.execute(
                 "INSERT INTO dealerships "
-                "(brand_slug, name, address, suburb, state, postcode, phone, website_url) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (brand_slug, name, suburb) DO NOTHING "
+                "(brand_slug, name, address, suburb, state, postcode, phone, website_url, api_email) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (brand_slug, name, suburb) DO UPDATE SET api_email = EXCLUDED.api_email "
+                "WHERE dealerships.api_email IS NULL "
                 "RETURNING id",
-                ("hyundai", name, address, suburb, state, postcode, phone, website),
+                ("hyundai", name, address, suburb, state, postcode, phone, website, api_email),
             )
             if cur.fetchone():
                 inserted += 1

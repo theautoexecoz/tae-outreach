@@ -47,18 +47,21 @@ def discover_mazda(limit: int = 0) -> int:
             address = d.get("address", "").strip() or None
             postcode = d.get("postCode", "").strip() or None
             phone = None
+            api_email = None
             for dept in d.get("departments", []):
-                if dept.get("phone"):
+                if not phone and dept.get("phone"):
                     phone = dept["phone"]
-                    break
+                if not api_email and dept.get("email"):
+                    api_email = dept["email"].strip().lower()
 
             cur = conn.execute(
                 "INSERT INTO dealerships "
-                "(brand_slug, name, address, suburb, state, postcode, phone, website_url) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (brand_slug, name, suburb) DO NOTHING "
+                "(brand_slug, name, address, suburb, state, postcode, phone, website_url, api_email) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (brand_slug, name, suburb) DO UPDATE SET api_email = EXCLUDED.api_email "
+                "WHERE dealerships.api_email IS NULL "
                 "RETURNING id",
-                ("mazda", name, address, suburb, state, postcode, phone, website),
+                ("mazda", name, address, suburb, state, postcode, phone, website, api_email),
             )
             if cur.fetchone():
                 inserted += 1

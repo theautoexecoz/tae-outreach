@@ -69,14 +69,17 @@ def discover_kia(limit: int = 0) -> int:
                     postcode = pc_match.group(1)
             phone = (d.get("phone") or "").strip() or None
             website = (d.get("homepage") or "").strip() or None
+            raw_email = (d.get("email") or "").strip().lower()
+            api_email = raw_email.split(",")[0].strip() if raw_email else None
 
             cur = conn.execute(
                 "INSERT INTO dealerships "
-                "(brand_slug, name, address, suburb, state, postcode, phone, website_url) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (brand_slug, name, suburb) DO NOTHING "
+                "(brand_slug, name, address, suburb, state, postcode, phone, website_url, api_email) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (brand_slug, name, suburb) DO UPDATE SET api_email = EXCLUDED.api_email "
+                "WHERE dealerships.api_email IS NULL "
                 "RETURNING id",
-                ("kia", name, address, suburb, state, postcode, phone, website),
+                ("kia", name, address, suburb, state, postcode, phone, website, api_email),
             )
             if cur.fetchone():
                 inserted += 1

@@ -127,14 +127,16 @@ def discover_gwm(limit: int = 0) -> int:
             postcode = parsed["postcode"]
             phone = d.get("phone", "").strip() or None
             website = None  # GWM cards don't expose dealer website URLs
+            api_email = d.get("email", "").strip().lower() or None
 
             cur = conn.execute(
                 "INSERT INTO dealerships "
-                "(brand_slug, name, address, suburb, state, postcode, phone, website_url) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (brand_slug, name, suburb) DO NOTHING "
+                "(brand_slug, name, address, suburb, state, postcode, phone, website_url, api_email) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (brand_slug, name, suburb) DO UPDATE SET api_email = EXCLUDED.api_email "
+                "WHERE dealerships.api_email IS NULL "
                 "RETURNING id",
-                ("gwm", name, address, suburb, state, postcode, phone, website),
+                ("gwm", name, address, suburb, state, postcode, phone, website, api_email),
             )
             if cur.fetchone():
                 inserted += 1

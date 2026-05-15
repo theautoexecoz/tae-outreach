@@ -50,6 +50,7 @@ def discover_isuzu(limit: int = 0) -> int:
             addr = {}
             website = None
             phone = None
+            api_email = None
             for dept_key in ("Sales", "Service", "Parts"):
                 dept = d.get(dept_key)
                 if not dept or not dept.get("IsActive"):
@@ -65,6 +66,11 @@ def discover_isuzu(limit: int = 0) -> int:
                     website = ws
                 if contact.get("Phone") and not phone:
                     phone = str(contact["Phone"])
+                for ekey in ("Email1", "Email2", "Email3"):
+                    val = (contact.get(ekey) or "").strip().lower()
+                    if val and "@" in val and not api_email:
+                        api_email = val
+                        break
 
             suburb = (addr.get("Suburb") or "").strip() or None
             raw_state = (addr.get("State") or "").strip()
@@ -74,11 +80,12 @@ def discover_isuzu(limit: int = 0) -> int:
 
             cur = conn.execute(
                 "INSERT INTO dealerships "
-                "(brand_slug, name, address, suburb, state, postcode, phone, website_url) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (brand_slug, name, suburb) DO NOTHING "
+                "(brand_slug, name, address, suburb, state, postcode, phone, website_url, api_email) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (brand_slug, name, suburb) DO UPDATE SET api_email = EXCLUDED.api_email "
+                "WHERE dealerships.api_email IS NULL "
                 "RETURNING id",
-                ("isuzu", name, address, suburb, state, postcode, phone, website),
+                ("isuzu", name, address, suburb, state, postcode, phone, website, api_email),
             )
             if cur.fetchone():
                 inserted += 1
