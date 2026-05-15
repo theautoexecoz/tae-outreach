@@ -100,14 +100,20 @@ def discover_volkswagen(limit: int = 0) -> int:
             postcode = (d.get("SalesPostCode") or d.get("dealerPostcode") or "").strip() or None
             phone = (d.get("SalesPhoneCode") or d.get("phone") or "").strip() or None
             website = (d.get("dealerWebsite") or "").strip() or None
+            api_email = (
+                (d.get("SalesEmailCode") or "").strip().lower()
+                or (d.get("FinanceEmail") or "").strip().lower()
+                or None
+            )
 
             cur = conn.execute(
                 "INSERT INTO dealerships "
-                "(brand_slug, name, address, suburb, state, postcode, phone, website_url) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (brand_slug, name, suburb) DO NOTHING "
+                "(brand_slug, name, address, suburb, state, postcode, phone, website_url, api_email) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (brand_slug, name, suburb) DO UPDATE SET api_email = EXCLUDED.api_email "
+                "WHERE dealerships.api_email IS NULL "
                 "RETURNING id",
-                ("volkswagen", name, address, suburb, state, postcode, phone, website),
+                ("volkswagen", name, address, suburb, state, postcode, phone, website, api_email),
             )
             if cur.fetchone():
                 inserted += 1
