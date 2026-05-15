@@ -87,13 +87,22 @@ def discover_nissan(limit: int = 0) -> int:
             website = websites[0].get("url") if websites else None
             phone = phones[0].get("value") if phones else None
 
+            api_email = None
+            for dept in d.get("departments", []):
+                dept_contact = dept.get("contact", {})
+                em = (dept_contact.get("email") or "").strip().lower()
+                if em and "@" in em:
+                    api_email = em
+                    break
+
             cur = conn.execute(
                 "INSERT INTO dealerships "
-                "(brand_slug, name, address, suburb, state, postcode, phone, website_url) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (brand_slug, name, suburb) DO NOTHING "
+                "(brand_slug, name, address, suburb, state, postcode, phone, website_url, api_email) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (brand_slug, name, suburb) DO UPDATE SET api_email = EXCLUDED.api_email "
+                "WHERE dealerships.api_email IS NULL "
                 "RETURNING id",
-                ("nissan", name, address, suburb, state, postcode, phone, website),
+                ("nissan", name, address, suburb, state, postcode, phone, website, api_email),
             )
             if cur.fetchone():
                 inserted += 1
