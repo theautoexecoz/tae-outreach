@@ -18,10 +18,10 @@ SCRAPE_JS = """() => {
         const badge = item.querySelector('.badge-success');
         const locType = badge ? badge.textContent.trim() : '';
 
-        const link = item.querySelector('a[href*="http"]');
-        const website = link ? link.href : '';
+        const links = Array.from(item.querySelectorAll('a'));
+        const dealerLink = links.find(a => a.textContent.trim() === 'Visit Dealer Website');
+        const website = dealerLink ? dealerLink.href : '';
 
-        // Get address from the raw text — it follows the badge text
         const rawText = item.textContent.trim();
 
         return {name, locType, website, rawText};
@@ -119,7 +119,10 @@ def discover_byd(limit: int = 0) -> int:
                 "INSERT INTO dealerships "
                 "(brand_slug, name, address, suburb, state, postcode, phone, website_url) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (brand_slug, name, suburb) DO NOTHING "
+                "ON CONFLICT (brand_slug, name, suburb) DO UPDATE "
+                "SET website_url = EXCLUDED.website_url "
+                "WHERE dealerships.website_url LIKE '%%google.com/maps%%' "
+                "OR dealerships.website_url IS NULL "
                 "RETURNING id",
                 ("byd", name, address, suburb, state, postcode, None, website),
             )
