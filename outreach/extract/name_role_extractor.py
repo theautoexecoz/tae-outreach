@@ -1,4 +1,5 @@
 import re
+import json
 import logging
 from bs4 import BeautifulSoup
 
@@ -186,6 +187,58 @@ def _split_name(full_name: str) -> tuple[str | None, str | None]:
     elif len(parts) == 1:
         return parts[0], None
     return None, None
+
+
+def extract_jsonld_people(html: str) -> list[dict]:
+    """Extract people from JSON-LD structured data (schema.org Person type).
+
+    Must run on raw HTML before script tags are stripped.
+    Returns contacts with email and role already attached.
+    """
+    people = []
+    seen_names = set()
+    soup = BeautifulSoup(html, "lxml")
+
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string or "")
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        items = [data] if isinstance(data, dict) else data if isinstance(data, list) else []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("@type") != "Person":
+                continue
+            name = item.get("name", "").strip()
+            if not name or len(name) < 3:
+                continue
+            name_key = name.lower()
+            if name_key in seen_names:
+                continue
+            seen_names.add(name_key)
+
+            first, last = _split_name(name)
+            email = (item.get("email") or "").strip().lower() or None
+            role = (item.get("jobTitle") or "").strip() or None
+            phone_raw = item.get("telephone")
+            if isinstance(phone_raw, list):
+                phone = phone_raw[0] if phone_raw else None
+            else:
+                phone = phone_raw
+            people.append({
+                "full_name": name,
+                "first_name": first,
+                "last_name": last,
+                "role_raw": role,
+                "email": email,
+                "phone": phone,
+            })
+
+    if people:
+        log.info("JSON-LD: extracted %d people", len(people))
+    return people
 
 
 def extract_people(html: str) -> list[dict]:

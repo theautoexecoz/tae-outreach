@@ -2,7 +2,7 @@ import logging
 from urllib.parse import urlparse
 from outreach.db import get_conn
 from outreach.extract.email_extractor import extract_emails
-from outreach.extract.name_role_extractor import extract_people
+from outreach.extract.name_role_extractor import extract_people, extract_jsonld_people
 from outreach.extract.pattern_guesser import (
     infer_email_pattern, guess_email, filter_dealership_emails,
 )
@@ -110,7 +110,35 @@ def run_extraction(brand: str | None = None, limit: int = 0):
     for i, row in enumerate(rows):
         html = row["team_page_html"]
         dealer_id = row["id"]
+        contacts_for_dealer = []
 
+        # Strategy 0: JSON-LD structured data (highest quality — name, email, role in one object)
+        jsonld_people = extract_jsonld_people(html)
+        jsonld_emails_used = set()
+
+        if jsonld_people:
+            for person in jsonld_people:
+                email = person.get("email")
+                email_domain = email.split("@")[1] if email and "@" in email else None
+                role_norm = _normalise_role(person.get("role_raw"))
+                contacts_for_dealer.append({
+                    "dealership_id": dealer_id,
+                    "full_name": person["full_name"],
+                    "first_name": person.get("first_name"),
+                    "last_name": person.get("last_name"),
+                    "role_raw": person.get("role_raw"),
+                    "role_normalised": role_norm,
+                    "email": email,
+                    "email_domain": email_domain,
+                    "email_pattern": None,
+                    "confidence": "direct" if email else "direct",
+                    "source": "team_page",
+                    "source_detail": row["team_page_url"],
+                })
+                if email:
+                    jsonld_emails_used.add(email)
+
+        # HTML-based extraction (complements JSON-LD — may find additional people)
         person_emails, _ = extract_emails(html)
         people = extract_people(html)
 
@@ -128,18 +156,28 @@ def run_extraction(brand: str | None = None, limit: int = 0):
         # If no pattern from dealer domain, try all business emails
         if not pattern and all_business_emails:
             pattern, pattern_domain = infer_email_pattern(all_business_emails)
+        # If still no pattern, try JSON-LD emails
+        if not pattern and jsonld_emails_used:
+            pattern, pattern_domain = infer_email_pattern(list(jsonld_emails_used))
 
         email_domain_for_guessing = pattern_domain or dealer_domain
 
-        # Build prefix lookup from business emails only
+        # Build prefix lookup from all known emails (HTML + JSON-LD)
         email_by_prefix = {}
         for email in all_business_emails:
             prefix = email.split("@")[0].lower()
             email_by_prefix[prefix] = email
+        for email in jsonld_emails_used:
+            prefix = email.split("@")[0].lower()
+            email_by_prefix[prefix] = email
 
-        contacts_for_dealer = []
+        jsonld_names = {c["full_name"].lower() for c in contacts_for_dealer}
 
         for person in people:
+            # Skip people already found via JSON-LD
+            if person["full_name"].lower() in jsonld_names:
+                continue
+
             first = person.get("first_name") or ""
             last = person.get("last_name") or ""
 
@@ -169,15 +207,14 @@ def run_extraction(brand: str | None = None, limit: int = 0):
             })
 
         # Orphan emails: found on page but not matched to any extracted person.
-        # Only create contacts for orphans that look like person email prefixes
-        # (two-part name-like prefix with dot or underscore separator).
         orphan_matched = {c["email"] for c in contacts_for_dealer if c["email"]}
-        for email in all_business_emails:
+        all_orphan_candidates = set(all_business_emails) | jsonld_emails_used
+        for email in sorted(all_orphan_candidates):
             if email in orphan_matched:
                 continue
             prefix = email.split("@")[0]
             email_domain = email.split("@")[1]
-            # Only accept two-part prefixes with separators (first.last, first_last)
+            # Accept two-part prefixes with separators (first.last, first_last)
             if "." in prefix:
                 parts = prefix.split(".")
             elif "_" in prefix:
