@@ -86,9 +86,10 @@ def discover_toyota(limit: int = 0) -> int:
 
             cur = conn.execute(
                 "INSERT INTO dealerships "
-                "(brand_slug, name, address, suburb, state, postcode, phone, website_url) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (brand_slug, name, suburb) DO NOTHING "
+                "(brand_slug, name, address, suburb, state, postcode, phone, website_url, api_email) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (brand_slug, name, suburb) DO UPDATE SET api_email = EXCLUDED.api_email "
+                "WHERE dealerships.api_email IS NULL "
                 "RETURNING id",
                 (
                     "toyota",
@@ -99,6 +100,7 @@ def discover_toyota(limit: int = 0) -> int:
                     (d.get("postCode") or "").strip() or None,
                     (d.get("telephone") or "").strip() or None,
                     (d.get("webSite") or "").strip() or None,
+                    (d.get("email") or "").strip().lower() or None,
                 ),
             )
             if cur.fetchone():

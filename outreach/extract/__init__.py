@@ -86,7 +86,7 @@ def run_extraction(brand: str | None = None, limit: int = 0):
     """Extract contacts from scraped team page HTML."""
     with get_conn() as conn:
         query = (
-            "SELECT id, name, team_page_url, team_page_html, website_url "
+            "SELECT id, name, team_page_url, team_page_html, website_url, api_email "
             "FROM dealerships WHERE team_page_html IS NOT NULL "
             "AND scrape_state IN ('scraped', 'extracted', 'extraction_empty')"
         )
@@ -144,12 +144,25 @@ def run_extraction(brand: str | None = None, limit: int = 0):
 
         dealer_domain = _extract_domain(row.get("website_url"))
 
+        # Include API email from OEM dealer locator (reveals domain + sometimes personal)
+        api_email = (row.get("api_email") or "").strip().lower()
+        api_email_domain = None
+        if api_email and "@" in api_email:
+            api_email_domain = api_email.split("@")[1]
+
         # Filter to emails on the dealership's domain only
         matched_emails = filter_dealership_emails(person_emails, dealer_domain)
 
         # Also keep emails on non-freemail domains as candidates
         # (dealer groups may use a different domain than the website)
         all_business_emails = filter_dealership_emails(person_emails)
+
+        # Add API email to the pool if it's not a freemail
+        if api_email and api_email_domain:
+            from outreach.extract.pattern_guesser import FREEMAIL_DOMAINS
+            if api_email_domain not in FREEMAIL_DOMAINS:
+                if api_email not in all_business_emails:
+                    all_business_emails.append(api_email)
 
         # Use dealership-domain emails for pattern inference
         pattern, pattern_domain = infer_email_pattern(matched_emails)
@@ -159,8 +172,11 @@ def run_extraction(brand: str | None = None, limit: int = 0):
         # If still no pattern, try JSON-LD emails
         if not pattern and jsonld_emails_used:
             pattern, pattern_domain = infer_email_pattern(list(jsonld_emails_used))
-
-        email_domain_for_guessing = pattern_domain or dealer_domain
+        # If still no pattern but API email reveals a domain, use that domain
+        if not pattern and api_email_domain:
+            email_domain_for_guessing = api_email_domain
+        else:
+            email_domain_for_guessing = pattern_domain or api_email_domain or dealer_domain
 
         # Build prefix lookup from all known emails (HTML + JSON-LD)
         email_by_prefix = {}
@@ -184,9 +200,13 @@ def run_extraction(brand: str | None = None, limit: int = 0):
             email = _match_email_to_name(first, last, email_by_prefix)
             confidence = "direct" if email else None
 
-            if not email and pattern and email_domain_for_guessing and first:
-                email = guess_email(first, last, email_domain_for_guessing, pattern)
-                confidence = "inferred"
+            if not email and email_domain_for_guessing and first and last:
+                if pattern:
+                    email = guess_email(first, last, email_domain_for_guessing, pattern)
+                    confidence = "inferred"
+                elif api_email_domain:
+                    email = guess_email(first, last, api_email_domain, "first.last")
+                    confidence = "inferred"
 
             email_domain = email.split("@")[1] if email and "@" in email else None
             role_norm = _normalise_role(person.get("role_raw"))
@@ -205,6 +225,26 @@ def run_extraction(brand: str | None = None, limit: int = 0):
                 "source": "team_page",
                 "source_detail": row["team_page_url"],
             })
+
+        # Retroactive pass: apply pattern/domain to contacts added before inference ran
+        guess_pattern = pattern or ("first.last" if api_email_domain else None)
+        guess_domain = email_domain_for_guessing or api_email_domain
+        if guess_pattern and guess_domain:
+            for c in contacts_for_dealer:
+                if c["email"] or not c.get("first_name") or not c.get("last_name"):
+                    continue
+                matched = _match_email_to_name(c["first_name"], c["last_name"], email_by_prefix)
+                if matched:
+                    c["email"] = matched
+                    c["email_domain"] = matched.split("@")[1]
+                    c["confidence"] = "direct"
+                else:
+                    guessed = guess_email(c["first_name"], c["last_name"], guess_domain, guess_pattern)
+                    if guessed:
+                        c["email"] = guessed
+                        c["email_domain"] = guessed.split("@")[1]
+                        c["email_pattern"] = guess_pattern
+                        c["confidence"] = "inferred"
 
         # Orphan emails: found on page but not matched to any extracted person.
         orphan_matched = {c["email"] for c in contacts_for_dealer if c["email"]}
