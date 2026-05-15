@@ -63,14 +63,16 @@ def discover_bmw(limit: int = 0) -> int:
             attrs = d.get("attributes", {})
             phone = (attrs.get("phone") or "").strip() or None
             website = (attrs.get("homepage") or "").strip() or None
+            api_email = (attrs.get("mail") or "").strip().lower() or None
 
             cur = conn.execute(
                 "INSERT INTO dealerships "
-                "(brand_slug, name, address, suburb, state, postcode, phone, website_url) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (brand_slug, name, suburb) DO NOTHING "
+                "(brand_slug, name, address, suburb, state, postcode, phone, website_url, api_email) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (brand_slug, name, suburb) DO UPDATE SET api_email = EXCLUDED.api_email "
+                "WHERE dealerships.api_email IS NULL "
                 "RETURNING id",
-                ("bmw", name, address, suburb, state, postcode, phone, website),
+                ("bmw", name, address, suburb, state, postcode, phone, website, api_email),
             )
             if cur.fetchone():
                 inserted += 1
