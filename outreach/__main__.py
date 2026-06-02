@@ -64,6 +64,17 @@ def cmd_cm_dedup(args):
     )
 
 
+def cmd_suppress(args):
+    from outreach.enrich.suppress import run_suppress, SUPPRESS_DOMAINS
+    r = run_suppress()
+    print(
+        f"\nSuppression (do-not-email) on {len(SUPPRESS_DOMAINS)} media domains:\n"
+        f"  newly suppressed : {len(r['newly_suppressed'])}\n"
+        f"  total suppressed : {r['total_suppressed']}\n"
+        + ("  " + ", ".join(r['newly_suppressed']) + "\n" if r['newly_suppressed'] else "")
+    )
+
+
 def cmd_stats(args):
     from outreach.db import get_conn
     with get_conn() as conn:
@@ -109,7 +120,7 @@ def cmd_migrate(args):
 
 def cmd_export(args):
     from outreach.export.csv_export import export_csv
-    export_csv(args.output)
+    export_csv(args.output, all_contacts=args.all)
 
 
 def main():
@@ -136,12 +147,15 @@ def main():
     sub.add_parser("apply-patterns", help="retrospective cross-dealer email pattern pass")
     sub.add_parser("cleanup", help="remove department label contacts (no-email junk)")
     sub.add_parser("cm-dedup", help="mark contacts against the Campaign Monitor subscriber universe")
+    sub.add_parser("suppress", help="do-not-email: suppress contacts on blocklisted media domains")
 
     sub.add_parser("stats", help="show pipeline statistics")
     sub.add_parser("migrate", help="run database migrations")
 
-    p_export = sub.add_parser("export", help="export contacts to CSV")
+    p_export = sub.add_parser("export", help="export the exportable mailout pool to CSV")
     p_export.add_argument("--output", default="contacts.csv")
+    p_export.add_argument("--all", action="store_true",
+                          help="dump every contact with an email (incl. CM-matched/suppressed) for review")
 
     args = parser.parse_args()
     if not args.command:
@@ -156,6 +170,7 @@ def main():
         "apply-patterns": cmd_apply_patterns,
         "cleanup": cmd_cleanup,
         "cm-dedup": cmd_cm_dedup,
+        "suppress": cmd_suppress,
         "stats": cmd_stats,
         "migrate": cmd_migrate,
         "export": cmd_export,
