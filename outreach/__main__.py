@@ -52,6 +52,18 @@ def cmd_cleanup(args):
     run_cleanup()
 
 
+def cmd_cm_dedup(args):
+    from outreach.enrich.cm_dedup import run_cm_dedup
+    s = run_cm_dedup()
+    print(
+        f"\nCM dedup — {s['total_with_email']} emailable contacts:\n"
+        f"  already active     : {s['active']:>5}  (existing subscribers — exclude)\n"
+        f"  unsubscribed       : {s['unsubscribed']:>5}  (opted out — exclude)\n"
+        f"  deleted/bounced    : {s['deleted']:>5}  (exclude)\n"
+        f"  NEW (exportable)   : {s['not_found']:>5}  (cm_status=not_found)\n"
+    )
+
+
 def cmd_stats(args):
     from outreach.db import get_conn
     with get_conn() as conn:
@@ -123,6 +135,7 @@ def main():
 
     sub.add_parser("apply-patterns", help="retrospective cross-dealer email pattern pass")
     sub.add_parser("cleanup", help="remove department label contacts (no-email junk)")
+    sub.add_parser("cm-dedup", help="mark contacts against the Campaign Monitor subscriber universe")
 
     sub.add_parser("stats", help="show pipeline statistics")
     sub.add_parser("migrate", help="run database migrations")
@@ -142,6 +155,7 @@ def main():
         "extract": cmd_extract,
         "apply-patterns": cmd_apply_patterns,
         "cleanup": cmd_cleanup,
+        "cm-dedup": cmd_cm_dedup,
         "stats": cmd_stats,
         "migrate": cmd_migrate,
         "export": cmd_export,
