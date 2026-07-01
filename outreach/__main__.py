@@ -115,6 +115,20 @@ def cmd_suppress(args):
     )
 
 
+def cmd_ledger_refresh(args):
+    from outreach.ledger import run_ledger_refresh
+    s = run_ledger_refresh()
+    d = s["disposition"]
+    print(
+        "\nLedger refresh (§3 provenance ledger):\n"
+        f"  company backfilled : team_page +{s['company_backfilled']['team_page']}  "
+        f"newspress +{s['company_backfilled']['newspress']}  (total with company: {s['with_company']})\n"
+        f"  ruled_out stamped  : suppressed {s['ruled_out_set']['suppressed']}  "
+        f"cm {s['ruled_out_set']['cm']}   |  reset to in_play: {s['reset_in_play']}\n"
+        f"  disposition now    : in_play {d.get('in_play', 0)}  ruled_out {d.get('ruled_out', 0)}\n"
+    )
+
+
 def cmd_stats(args):
     from outreach.db import get_conn
     with get_conn() as conn:
@@ -199,6 +213,7 @@ def main():
     p_np.add_argument("--id", type=int, default=None, help="fetch+parse a single public release id (no cookie needed) — testing")
     p_np.add_argument("--dry-run", action="store_true", help="parse + report, write nothing")
 
+    sub.add_parser("ledger-refresh", help="§3 ledger: backfill company + derive disposition/ruled_out from suppressed+cm_status")
     sub.add_parser("stats", help="show pipeline statistics")
     sub.add_parser("migrate", help="run database migrations")
 
@@ -223,6 +238,7 @@ def main():
         "suppress": cmd_suppress,
         "ooo-harvest": cmd_ooo_harvest,
         "newspress-harvest": cmd_newspress_harvest,
+        "ledger-refresh": cmd_ledger_refresh,
         "stats": cmd_stats,
         "migrate": cmd_migrate,
         "export": cmd_export,
