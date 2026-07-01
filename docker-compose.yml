@@ -32,6 +32,9 @@ services:
       OOO_IMAP_USER: ${OOO_IMAP_USER:-editor@theautoexec.com}
       OOO_IMAP_PASSWORD: ${OOO_IMAP_PASSWORD:-}
       OOO_IMAP_FOLDER: ${OOO_IMAP_FOLDER:-}
+      NEWSPRESS_BASE: ${NEWSPRESS_BASE:-https://newspressaustralia.com}
+      NEWSPRESS_COOKIE: ${NEWSPRESS_COOKIE:-}
+      NEWSPRESS_RPS: ${NEWSPRESS_RPS:-1.5}
       TZ: Australia/Melbourne
     volumes:
       - ./outreach:/app/outreach

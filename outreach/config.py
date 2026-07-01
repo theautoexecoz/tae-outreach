@@ -25,3 +25,18 @@ SELF_DOMAINS = {
     for d in os.environ.get("SELF_DOMAINS", "theautoexec.com").split(",")
     if d.strip()
 }
+
+# ── Newspress Australia scrape (Email-list finalisation §1b) ─────────────────
+# PR/marketing contacts from OEM press releases. The browsable release list is
+# behind a Newspress media login (Laravel Sanctum, cookie-based); individual
+# releases are public. NEWSPRESS_COOKIE is a logged-in session's Cookie header
+# (session + XSRF-TOKEN), taken at runtime via -e — not persisted. A browser UA
+# is REQUIRED (a bot UA is served an empty SPA shell).
+NEWSPRESS_BASE = os.environ.get("NEWSPRESS_BASE", "https://newspressaustralia.com")
+NEWSPRESS_COOKIE = os.environ.get("NEWSPRESS_COOKIE", "")
+NEWSPRESS_UA = os.environ.get(
+    "NEWSPRESS_UA",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/126.0 Safari/537.36",
+)
+NEWSPRESS_RPS = float(os.environ.get("NEWSPRESS_RPS", "1.5"))

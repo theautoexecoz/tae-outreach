@@ -86,6 +86,24 @@ def cmd_ooo_harvest(args):
         print()
 
 
+def cmd_newspress_harvest(args):
+    from outreach.harvest.newspress import run_newspress_harvest
+    s = run_newspress_harvest(limit=args.limit, dry_run=args.dry_run,
+                              max_pages=args.max_pages, only_id=args.id)
+    print(
+        f"\nNewspress harvest — {s['releases']} release(s) parsed"
+        + (" [DRY RUN — no writes]" if s["dry_run"] else "") + ":\n"
+        f"  missing/404 releases : {s['missing']:>5}\n"
+        f"  unique PR contacts   : {s['contacts']:>5}"
+        + (f"  ({s['inserted']} inserted, rest already known)" if not s["dry_run"] else "") + "\n"
+    )
+    if s["dry_run"]:
+        print("  sample contacts:")
+        for c in s.get("sample_contacts", []):
+            print(f"    {c['email']:<40} {c['full_name']}  [{c['role_raw'] or '-'}]")
+        print()
+
+
 def cmd_suppress(args):
     from outreach.enrich.suppress import run_suppress, SUPPRESS_DOMAINS
     r = run_suppress()
@@ -175,6 +193,12 @@ def main():
     p_ooo.add_argument("--limit", type=int, default=0, help="cap to most-recent N messages")
     p_ooo.add_argument("--dry-run", action="store_true", help="parse + report, write nothing")
 
+    p_np = sub.add_parser("newspress-harvest", help="harvest PR/marketing contacts from newspressaustralia.com releases")
+    p_np.add_argument("--limit", type=int, default=0, help="cap number of releases processed")
+    p_np.add_argument("--max-pages", type=int, default=0, help="cap release-list pagination")
+    p_np.add_argument("--id", type=int, default=None, help="fetch+parse a single public release id (no cookie needed) — testing")
+    p_np.add_argument("--dry-run", action="store_true", help="parse + report, write nothing")
+
     sub.add_parser("stats", help="show pipeline statistics")
     sub.add_parser("migrate", help="run database migrations")
 
@@ -198,6 +222,7 @@ def main():
         "cm-dedup": cmd_cm_dedup,
         "suppress": cmd_suppress,
         "ooo-harvest": cmd_ooo_harvest,
+        "newspress-harvest": cmd_newspress_harvest,
         "stats": cmd_stats,
         "migrate": cmd_migrate,
         "export": cmd_export,
