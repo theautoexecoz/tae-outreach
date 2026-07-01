@@ -13,13 +13,27 @@ from outreach.db import get_conn
 
 log = logging.getLogger("outreach.enrich.suppress")
 
-# Motoring-media / competitor domains — never cold-email these.
+# Motoring-media / competitor domains — never cold-email these (journalists &
+# rival outlets aren't outreach targets). Extended 2026-07-01 with the motoring-
+# media domains surfaced by the Newspress §1b harvest.
 SUPPRESS_DOMAINS = {
     "drive.com.au",
     "carsales.com.au",
     "carexpert.com.au",
     "carsauce.com",
     "carsauce.com.au",
+    # motoring media surfaced via Newspress release contact blocks
+    "evcentral.com.au",
+    "wheelsmedia.com.au",
+    "whichcar.com.au",
+    "carsguide.com.au",
+    "caradvice.com.au",
+    "motoring.com.au",
+    "carscoops.com",
+    "thedriven.io",
+    "goauto.com.au",
+    "redriven.com.au",
+    "news.com.au",
 }
 
 
