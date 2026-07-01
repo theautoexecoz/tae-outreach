@@ -61,22 +61,47 @@ NP_SELF_DOMAINS = set(SELF_DOMAINS) | {"newspressaustralia.com", "newspress.com"
 CONTACT_HEADER_RE = re.compile(
     r"\b(contacts?|media enqu|media contact|further information|press (?:contact|office))\b", re.I
 )
-# a name-shaped cell that is NOT a company/label
-COMPANY_MARK_RE = re.compile(
-    r"\b(australia|pty|ltd|limited|group|ogilvy|motors?|communications?|media|holdings|"
-    r"inc|corp|company|marketing|automotive|consulting|partners|for|and|the)\b", re.I
-)
+# PR/media shared inboxes on top of the generic OOO role set — not individuals.
+NP_ROLE_TOKENS = set(ROLE_LOCALPARTS) | {
+    "media", "pr", "press", "comms", "communications", "communication",
+    "newsroom", "publicrelations", "mediarelations", "corporateaffairs",
+    "prteam", "mediateam", "pressoffice", "media.relations",
+}
+# Tokens that mean a capitalised phrase is a role/label/company, not a person's name.
+NAME_STOPWORDS = {
+    # company / org
+    "australia", "australian", "pty", "ltd", "limited", "group", "holdings",
+    "inc", "corp", "corporation", "company", "co", "motors", "motor",
+    "automotive", "consulting", "partners", "solutions", "services",
+    "enterprises", "ogilvy", "communications", "communication",
+    # role / label
+    "manager", "director", "officer", "chief", "executive", "consultant",
+    "advisor", "adviser", "principal", "coordinator", "president", "head",
+    "specialist", "representative", "associate", "supervisor", "lead",
+    "relations", "public", "product", "external", "corporate", "affairs",
+    "media", "press", "marketing", "sales", "service", "finance", "insurance",
+    "newsroom", "department", "division", "office", "team",
+    "mobile", "telephone", "phone", "email", "enquiries", "enquiry",
+    "contact", "contacts", "national", "global", "international",
+    "region", "regional",
+}
+
+
+def _good_name(t: str) -> bool:
+    """A real person's name: 2-3 tokens, none a role/label/company word."""
+    if not t:
+        return False
+    toks = [w.lower().strip(".,'") for w in t.split()]
+    if not (2 <= len(toks) <= 3):
+        return False
+    return not any(w in NAME_STOPWORDS for w in toks)
 
 
 def _is_name(t: str) -> bool:
-    if not t:
+    """Capitalised, person-shaped cell (for locating the table's name row)."""
+    if not t or not all(re.match(r"^[A-Z][a-zA-Z'\-]+$", w) for w in t.split()):
         return False
-    toks = t.split()
-    if not (2 <= len(toks) <= 3):
-        return False
-    if not all(re.match(r"^[A-Z][a-zA-Z'\-]+$", w) for w in toks):
-        return False
-    return not COMPANY_MARK_RE.search(t)
+    return _good_name(t)
 
 
 def _disallowed(local: str, domain: str) -> str | None:
@@ -85,7 +110,8 @@ def _disallowed(local: str, domain: str) -> str | None:
         return "self"
     if domain in FREEMAIL_DOMAINS:
         return "freemail"
-    if local in ROLE_LOCALPARTS or local.startswith(("noreply", "no-reply", "mailer")):
+    first_tok = re.split(r"[._\-]", local, 1)[0]
+    if local in NP_ROLE_TOKENS or first_tok in NP_ROLE_TOKENS or local.startswith(("noreply", "no-reply", "mailer")):
         return "role"
     if HASH_LOCAL_RE.match(local) or DIGIT_RUN_RE.search(local) or len(local) > 40:
         return "opaque"
@@ -156,7 +182,7 @@ def _parse_release(content_html: str) -> list[dict]:
         pos = text_lower.find(email)
         ctx_name = _name_near(text, pos) if pos != -1 else None
         full_name = table_name or _resolve_name(local, ctx_name)
-        if not full_name:
+        if not full_name or not _good_name(full_name):   # reject role/label/company "names"
             continue
         role_raw = _role_near(text, pos) if pos != -1 else None
         first, last = _split_name(full_name)
@@ -197,8 +223,8 @@ def _get_json(c: httpx.Client, path: str, params: dict | None = None) -> dict | 
     return None
 
 
-def _list_ids(c: httpx.Client, max_pages: int, per_page: int = 50) -> list[int]:
-    """Authenticated release-id list, newest first, across pages."""
+def _list_ids(c: httpx.Client, max_pages: int, per_page: int = 100) -> list[int]:
+    """Authenticated release-id list (Laravel paginator), newest first, across pages."""
     ids: list[int] = []
     page = 1
     while True:
@@ -210,22 +236,20 @@ def _list_ids(c: httpx.Client, max_pages: int, per_page: int = 50) -> list[int]:
                 "session? (the list route is auth-gated; a bad/expired cookie 404s "
                 "'Unauthenticated')."
             )
-        block = data.get("data") or {}
-        items = block.get("data") if isinstance(block, dict) else block
-        items = items or []
+        block = data.get("data") or {}          # Laravel paginator object
+        items = (block.get("data") if isinstance(block, dict) else block) or []
         for it in items:
             rid = it.get("id") if isinstance(it, dict) else None
             if rid:
                 ids.append(int(rid))
-        pag = data.get("paginator") or (block.get("paginator") if isinstance(block, dict) else None) or {}
-        last = pag.get("last_page") or pag.get("lastPage") or pag.get("total_pages")
-        log.info("list page %d: +%d ids (total %d)", page, len(items), len(ids))
-        if len(items) < per_page or (last and page >= last) or (max_pages and page >= max_pages):
+        last = block.get("last_page") if isinstance(block, dict) else None
+        total = block.get("total") if isinstance(block, dict) else None
+        log.info("list page %d/%s: +%d ids (%d/%s)", page, last or "?", len(items), len(ids), total or "?")
+        if not items or (last and page >= last) or (max_pages and page >= max_pages):
             break
         page += 1
         time.sleep(1.0 / NEWSPRESS_RPS if NEWSPRESS_RPS > 0 else 0)
-    # de-dupe, preserve newest-first order
-    return list(dict.fromkeys(ids))
+    return list(dict.fromkeys(ids))            # de-dupe, keep newest-first order
 
 
 def run_newspress_harvest(limit: int = 0, dry_run: bool = False,
@@ -256,12 +280,19 @@ def run_newspress_harvest(limit: int = 0, dry_run: bool = False,
         log.info("processing %d release(s)", len(ids))
 
         for i, rid in enumerate(ids):
-            data = _get_json(c, f"/public/releases/get-release/{rid}")
+            try:
+                data = _get_json(c, f"/public/releases/get-release/{rid}")
+            except Exception as e:            # one bad release must not abort a long run
+                log.warning("release %s fetch error: %s", rid, e)
+                stats["errors"] += 1
+                data = None
             rel = (data or {}).get("data") if data else None
             if not rel:
                 stats["missing"] += 1
                 continue
             stats["releases"] += 1
+            if i and i % 250 == 0:
+                log.info("progress %d/%d releases, %d unique contacts", i, len(ids), len(contacts))
             client_name = ((rel.get("client") or {}).get("name") or "").strip()
             title = (rel.get("title") or "").strip()
             detail = f"newspress: {client_name} — {title}"[:250] if client_name else f"newspress: {title}"[:250]
@@ -274,7 +305,8 @@ def run_newspress_harvest(limit: int = 0, dry_run: bool = False,
 
     summary = {
         "releases": stats["releases"], "missing": stats["missing"],
-        "contacts": len(contacts), "inserted": 0, "dry_run": dry_run,
+        "errors": stats["errors"], "contacts": len(contacts),
+        "inserted": 0, "dry_run": dry_run,
     }
     if dry_run:
         log.info("dry-run: %d releases, %d unique contacts (no writes)",
