@@ -9,6 +9,7 @@ middleware), failing closed — 503 if the token is unconfigured, 401 if
 missing/invalid. No host/LAN publish; reachable only by service name + token.
 
 Endpoints (all under /api/v1/outreach, all token-guarded):
+  GET /cockpit   — composite payload the CT room renders in one fetch
   GET /summary   — cockpit overview: totals + splits by confidence/source/cm/brand
   GET /contacts  — filterable, paginated contact list (joined to dealership)
   GET /sends     — live send-monitoring panel: per-day events + rates + stop-lines
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import os
 import secrets
+from datetime import datetime, timezone
 from typing import Optional
 
 import psycopg
@@ -47,6 +49,10 @@ app.add_middleware(
 
 def get_conn():
     return psycopg.connect(DATABASE_DSN, row_factory=dict_row)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 @app.get("/health")
@@ -136,21 +142,19 @@ class SendMonitor(BaseModel):
     generated_at: str
 
 
-# ── Router (route-scoped token guard) ───────────────────────────────────────
-v1 = APIRouter(prefix="/api/v1/outreach", dependencies=[Depends(require_ct_token)])
+class Cockpit(BaseModel):
+    summary: Summary
+    sends: SendMonitor
+    contacts: ContactPage
 
 
+# ── Data helpers (callable by the routes and the composite /cockpit) ─────────
 def _counts(cur, sql: str) -> list[Count]:
     cur.execute(sql)
     return [Count(label=r["label"], n=r["n"]) for r in cur.fetchall()]
 
 
-@v1.get("/summary", response_model=Summary)
-def summary():
-    """Cockpit overview — totals and the splits that gate a send (confidence,
-    CM status, source) plus per-brand harvest coverage."""
-    from datetime import datetime, timezone
-
+def _summary() -> Summary:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) AS n FROM contacts")
@@ -195,23 +199,21 @@ def summary():
         by_source=by_source,
         by_cm_status=by_cm_status,
         by_brand=by_brand,
-        generated_at=datetime.now(timezone.utc).isoformat(),
+        generated_at=_now(),
     )
 
 
-@v1.get("/contacts", response_model=ContactPage)
-def contacts(
+def _contacts(
     brand: Optional[str] = None,
     state: Optional[str] = None,
     confidence: Optional[str] = None,
     source: Optional[str] = None,
     cm_status: Optional[str] = None,
     emailable: Optional[bool] = None,
-    q: Optional[str] = Query(None, description="search name / email / domain / dealership"),
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
-):
-    """Filterable, paginated contact list joined to its dealership."""
+    q: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> ContactPage:
     conditions: list[str] = []
     params: list = []
 
@@ -294,12 +296,7 @@ def contacts(
     return ContactPage(total=total, limit=limit, offset=offset, items=items)
 
 
-@v1.get("/sends", response_model=SendMonitor)
-def sends(days: int = Query(30, ge=1, le=365)):
-    """Live send-monitoring panel: per-day CM events + rolling bounce/complaint
-    rates against the stop-lines. Returns a clean zero state until the first send."""
-    from datetime import datetime, timezone
-
+def _sends(days: int = 30) -> SendMonitor:
     thresholds = {
         "complaint_stop": COMPLAINT_STOP,
         "bounce_warn": BOUNCE_WARN,
@@ -359,8 +356,43 @@ def sends(days: int = Query(30, ge=1, le=365)):
         complaint_rate=round(complaint_rate, 5),
         thresholds=thresholds,
         by_day=by_day,
-        generated_at=datetime.now(timezone.utc).isoformat(),
+        generated_at=_now(),
     )
+
+
+# ── Router (route-scoped token guard) ───────────────────────────────────────
+v1 = APIRouter(prefix="/api/v1/outreach", dependencies=[Depends(require_ct_token)])
+
+
+@v1.get("/cockpit", response_model=Cockpit)
+def cockpit():
+    """Everything the CT Outreach room renders, in one guarded fetch."""
+    return Cockpit(summary=_summary(), sends=_sends(30), contacts=_contacts(limit=100))
+
+
+@v1.get("/summary", response_model=Summary)
+def summary():
+    return _summary()
+
+
+@v1.get("/contacts", response_model=ContactPage)
+def contacts(
+    brand: Optional[str] = None,
+    state: Optional[str] = None,
+    confidence: Optional[str] = None,
+    source: Optional[str] = None,
+    cm_status: Optional[str] = None,
+    emailable: Optional[bool] = None,
+    q: Optional[str] = Query(None, description="search name / email / domain / dealership"),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    return _contacts(brand, state, confidence, source, cm_status, emailable, q, limit, offset)
+
+
+@v1.get("/sends", response_model=SendMonitor)
+def sends(days: int = Query(30, ge=1, le=365)):
+    return _sends(days)
 
 
 app.include_router(v1)
