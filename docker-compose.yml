@@ -27,6 +27,11 @@ services:
       CM_LIST_ID: ${CM_LIST_ID}
       USER_AGENT: "TAE-Outreach/1.0 (contact: info@theautoexec.com)"
       RATE_LIMIT_RPS: "0.5"
+      OOO_IMAP_HOST: ${OOO_IMAP_HOST:-mail.theautoexec.com}
+      OOO_IMAP_PORT: ${OOO_IMAP_PORT:-993}
+      OOO_IMAP_USER: ${OOO_IMAP_USER:-editor@theautoexec.com}
+      OOO_IMAP_PASSWORD: ${OOO_IMAP_PASSWORD:-}
+      OOO_IMAP_FOLDER: ${OOO_IMAP_FOLDER:-}
       TZ: Australia/Melbourne
     volumes:
       - ./outreach:/app/outreach

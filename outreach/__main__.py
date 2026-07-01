@@ -64,6 +64,28 @@ def cmd_cm_dedup(args):
     )
 
 
+def cmd_ooo_harvest(args):
+    from outreach.harvest.ooo import run_ooo_harvest
+    s = run_ooo_harvest(limit=args.limit, dry_run=args.dry_run)
+    sk = s["skipped"]
+    print(
+        f"\nOOO harvest — {s['messages']} message(s) scanned"
+        + (" [DRY RUN — no writes]" if s["dry_run"] else "") + ":\n"
+        f"  senders excluded (GB rule) : {s['senders_excluded']:>5}\n"
+        f"  skipped self/free/role/opq : {sk['self']}/{sk['freemail']}/{sk['role']}/{sk['opaque']}\n"
+        f"  skipped unnamed (no person): {sk['unnamed']:>5}\n"
+        f"  NEW delegate contacts      : {s['candidates']:>5}"
+        + (f"  ({s['inserted']} inserted, rest already known)" if not s["dry_run"] else "") + "\n"
+        f"  domains profiled (formats) : {s['domains_profiled']:>5}"
+        + (f"  ({s['domains_written']} written)" if not s["dry_run"] else "") + "\n"
+    )
+    if s["dry_run"]:
+        print("  sample new contacts:")
+        for c in s.get("sample_contacts", []):
+            print(f"    {c['email']:<40} {c['full_name']}  [{c['role_raw'] or '-'}]")
+        print()
+
+
 def cmd_suppress(args):
     from outreach.enrich.suppress import run_suppress, SUPPRESS_DOMAINS
     r = run_suppress()
@@ -149,6 +171,10 @@ def main():
     sub.add_parser("cm-dedup", help="mark contacts against the Campaign Monitor subscriber universe")
     sub.add_parser("suppress", help="do-not-email: suppress contacts on blocklisted media domains")
 
+    p_ooo = sub.add_parser("ooo-harvest", help="harvest delegate contacts + domain formats from OOO replies (excludes the sender)")
+    p_ooo.add_argument("--limit", type=int, default=0, help="cap to most-recent N messages")
+    p_ooo.add_argument("--dry-run", action="store_true", help="parse + report, write nothing")
+
     sub.add_parser("stats", help="show pipeline statistics")
     sub.add_parser("migrate", help="run database migrations")
 
@@ -171,6 +197,7 @@ def main():
         "cleanup": cmd_cleanup,
         "cm-dedup": cmd_cm_dedup,
         "suppress": cmd_suppress,
+        "ooo-harvest": cmd_ooo_harvest,
         "stats": cmd_stats,
         "migrate": cmd_migrate,
         "export": cmd_export,
