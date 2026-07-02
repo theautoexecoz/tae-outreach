@@ -216,6 +216,32 @@ def cmd_export(args):
     export_csv(args.output, all_contacts=args.all)
 
 
+def cmd_flag_stale(args):
+    from outreach.db import get_conn
+    ids = [int(x) for x in args.ids.split(",") if x.strip()]
+    emails = [x.strip().lower() for x in args.emails.split(",") if x.strip()]
+    if not ids and not emails:
+        print("nothing to do — pass --ids and/or --emails")
+        return
+    n = 0
+    with get_conn() as conn:
+        if args.unflag:
+            set_sql = ("suppressed = false, suppress_reason = NULL, disposition = 'in_play', "
+                       "ruled_out_stage = NULL, ruled_out_reason = NULL")
+            guard = " AND suppress_reason = 'left_employer'"
+        else:
+            set_sql = ("suppressed = true, suppress_reason = 'left_employer', "
+                       "disposition = 'ruled_out', ruled_out_stage = 'left_employer', "
+                       "ruled_out_reason = 'flagged — left employer / outdated'")
+            guard = ""
+        if ids:
+            n += conn.execute(f"UPDATE contacts SET {set_sql} WHERE id = ANY(%s){guard}", (ids,)).rowcount
+        if emails:
+            n += conn.execute(f"UPDATE contacts SET {set_sql} WHERE lower(email) = ANY(%s){guard}", (emails,)).rowcount
+    verb = "un-flagged" if args.unflag else "flagged (suppressed) as left_employer"
+    print(f"{verb}: {n} contact(s)")
+
+
 def main():
     parser = argparse.ArgumentParser(prog="outreach", description="TAE Outreach — dealer contact scraper")
     sub = parser.add_subparsers(dest="command")
@@ -271,6 +297,11 @@ def main():
     p_export.add_argument("--all", action="store_true",
                           help="dump every contact with an email (incl. CM-matched/suppressed) for review")
 
+    p_flag = sub.add_parser("flag-stale", help="suppress contacts as left-employer/outdated (cockpit stale cull, CLI path)")
+    p_flag.add_argument("--ids", default="", help="comma-separated contact ids")
+    p_flag.add_argument("--emails", default="", help="comma-separated emails (case-insensitive)")
+    p_flag.add_argument("--unflag", action="store_true", help="reverse a prior left_employer flag instead of setting it")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -294,6 +325,7 @@ def main():
         "stats": cmd_stats,
         "migrate": cmd_migrate,
         "export": cmd_export,
+        "flag-stale": cmd_flag_stale,
     }
     handlers[args.command](args)
 

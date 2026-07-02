@@ -42,7 +42,7 @@ app = FastAPI(title="TAE Outreach API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -91,6 +91,7 @@ class Summary(BaseModel):
     by_confidence: list[Count]
     by_source: list[Count]
     by_cm_status: list[Count]
+    by_send_group: list[Count]
     by_brand: list[BrandCoverage]
     generated_at: str
 
@@ -105,6 +106,9 @@ class Contact(BaseModel):
     source: Optional[str] = None
     source_detail: Optional[str] = None
     cm_status: Optional[str] = None
+    send_group: Optional[str] = None
+    suppressed: bool = False
+    suppress_reason: Optional[str] = None
     brand_slug: Optional[str] = None
     dealership: Optional[str] = None
     suburb: Optional[str] = None
@@ -177,6 +181,10 @@ def _summary() -> Summary:
             by_cm_status = _counts(cur, """
                 SELECT COALESCE(cm_status, 'unchecked') AS label, COUNT(*) AS n
                 FROM contacts GROUP BY 1 ORDER BY n DESC""")
+            by_send_group = _counts(cur, """
+                SELECT send_group AS label, COUNT(*) AS n
+                FROM contacts WHERE send_group IS NOT NULL
+                GROUP BY send_group ORDER BY MIN(export_batch)""")
 
             cur.execute("""
                 SELECT d.brand_slug AS brand_slug,
@@ -198,8 +206,32 @@ def _summary() -> Summary:
         by_confidence=by_confidence,
         by_source=by_source,
         by_cm_status=by_cm_status,
+        by_send_group=by_send_group,
         by_brand=by_brand,
         generated_at=_now(),
+    )
+
+
+def _row_to_contact(r) -> Contact:
+    return Contact(
+        id=r["id"],
+        full_name=r.get("full_name"),
+        role=r.get("role"),
+        email=r.get("email"),
+        email_domain=r.get("email_domain"),
+        confidence=r.get("confidence"),
+        source=r.get("source"),
+        source_detail=r.get("source_detail"),
+        cm_status=r.get("cm_status"),
+        send_group=r.get("send_group"),
+        suppressed=bool(r.get("suppressed")),
+        suppress_reason=r.get("suppress_reason"),
+        brand_slug=r.get("brand_slug"),
+        dealership=r.get("dealership"),
+        suburb=r.get("suburb"),
+        state=r.get("state"),
+        exported=r.get("export_batch") is not None,
+        created_at=r["created_at"].isoformat() if r.get("created_at") else None,
     )
 
 
@@ -210,7 +242,9 @@ def _contacts(
     source: Optional[str] = None,
     cm_status: Optional[str] = None,
     emailable: Optional[bool] = None,
+    send_group: Optional[str] = None,
     q: Optional[str] = None,
+    sort: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
 ) -> ContactPage:
@@ -239,6 +273,9 @@ def _contacts(
         conditions.append("c.email IS NOT NULL")
     elif emailable is False:
         conditions.append("c.email IS NULL")
+    if send_group:
+        conditions.append("c.send_group = %s")
+        params.append(send_group)
     if q:
         conditions.append(
             "(c.full_name ILIKE %s OR c.email ILIKE %s OR c.email_domain ILIKE %s OR d.name ILIKE %s)"
@@ -256,43 +293,31 @@ def _contacts(
             )
             total = cur.fetchone()["n"]
 
+            order = {
+                "email": "ORDER BY c.email_domain ASC, split_part(c.email, '@', 1) ASC",
+                "send_group": "ORDER BY c.export_batch ASC NULLS LAST, c.email_domain ASC, split_part(c.email, '@', 1) ASC",
+                "batch": "ORDER BY c.export_batch ASC NULLS LAST, c.id ASC",
+            }.get(sort or "", "ORDER BY c.created_at DESC, c.id DESC")
+
             cur.execute(
                 f"""
                 SELECT c.id, c.full_name,
                        COALESCE(c.role_normalised, c.role_raw) AS role,
                        c.email, c.email_domain, c.confidence, c.source, c.source_detail,
-                       c.cm_status, c.export_batch, c.created_at,
+                       c.cm_status, c.send_group, c.suppressed, c.suppress_reason,
+                       c.export_batch, c.created_at,
                        d.brand_slug, d.name AS dealership, d.suburb, d.state
                 FROM contacts c
                 LEFT JOIN dealerships d ON c.dealership_id = d.id
                 {where}
-                ORDER BY c.created_at DESC, c.id DESC
+                {order}
                 LIMIT %s OFFSET %s
                 """,
                 params + [limit, offset],
             )
             rows = cur.fetchall()
 
-    items = [
-        Contact(
-            id=r["id"],
-            full_name=r.get("full_name"),
-            role=r.get("role"),
-            email=r.get("email"),
-            email_domain=r.get("email_domain"),
-            confidence=r.get("confidence"),
-            source=r.get("source"),
-            source_detail=r.get("source_detail"),
-            cm_status=r.get("cm_status"),
-            brand_slug=r.get("brand_slug"),
-            dealership=r.get("dealership"),
-            suburb=r.get("suburb"),
-            state=r.get("state"),
-            exported=r.get("export_batch") is not None,
-            created_at=r["created_at"].isoformat() if r.get("created_at") else None,
-        )
-        for r in rows
-    ]
+    items = [_row_to_contact(r) for r in rows]
     return ContactPage(total=total, limit=limit, offset=offset, items=items)
 
 
@@ -366,8 +391,11 @@ v1 = APIRouter(prefix="/api/v1/outreach", dependencies=[Depends(require_ct_token
 
 @v1.get("/cockpit", response_model=Cockpit)
 def cockpit():
-    """Everything the CT Outreach room renders, in one guarded fetch."""
-    return Cockpit(summary=_summary(), sends=_sends(30), contacts=_contacts(limit=100))
+    """Everything the CT Outreach room renders, in one guarded fetch.
+    Contacts are batched-first (send groups up front) so GB can eyeball a batch
+    for the pre-send stale cull; the room sorts/filters these client-side."""
+    return Cockpit(summary=_summary(), sends=_sends(30),
+                   contacts=_contacts(limit=600, sort="batch"))
 
 
 @v1.get("/summary", response_model=Summary)
@@ -383,16 +411,67 @@ def contacts(
     source: Optional[str] = None,
     cm_status: Optional[str] = None,
     emailable: Optional[bool] = None,
+    send_group: Optional[str] = None,
     q: Optional[str] = Query(None, description="search name / email / domain / dealership"),
+    sort: Optional[str] = Query(None, description="email | send_group | batch (default: newest)"),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
-    return _contacts(brand, state, confidence, source, cm_status, emailable, q, limit, offset)
+    return _contacts(brand, state, confidence, source, cm_status, emailable,
+                     send_group, q, sort, limit, offset)
 
 
 @v1.get("/sends", response_model=SendMonitor)
 def sends(days: int = Query(30, ge=1, le=365)):
     return _sends(days)
+
+
+class FlagBody(BaseModel):
+    stale: bool = True
+
+
+@v1.post("/items/{contact_id}/flag", response_model=Contact)
+def flag_contact(contact_id: int, body: Optional[FlagBody] = None):
+    """Cockpit stale-flag (left employer / outdated). stale=true suppresses the
+    contact (suppress_reason='left_employer') so it drops from planning + export;
+    stale=false undoes it (only when it was a left_employer flag). Returns the
+    updated contact for the HTMX row-swap — same /items/{id}/{action} shape the
+    scrapers room uses."""
+    stale = True if body is None else body.stale
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if stale:
+                cur.execute(
+                    """UPDATE contacts
+                       SET suppressed = true, suppress_reason = 'left_employer',
+                           disposition = 'ruled_out', ruled_out_stage = 'left_employer',
+                           ruled_out_reason = 'flagged in cockpit — left employer / outdated'
+                       WHERE id = %s""",
+                    (contact_id,),
+                )
+            else:
+                cur.execute(
+                    """UPDATE contacts
+                       SET suppressed = false, suppress_reason = NULL,
+                           disposition = 'in_play', ruled_out_stage = NULL, ruled_out_reason = NULL
+                       WHERE id = %s AND suppress_reason = 'left_employer'""",
+                    (contact_id,),
+                )
+            cur.execute(
+                """SELECT c.id, c.full_name, COALESCE(c.role_normalised, c.role_raw) AS role,
+                          c.email, c.email_domain, c.confidence, c.source, c.source_detail,
+                          c.cm_status, c.send_group, c.suppressed, c.suppress_reason,
+                          c.export_batch, c.created_at,
+                          d.brand_slug, d.name AS dealership, d.suburb, d.state
+                   FROM contacts c LEFT JOIN dealerships d ON c.dealership_id = d.id
+                   WHERE c.id = %s""",
+                (contact_id,),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    if not row:
+        raise HTTPException(status_code=404, detail="contact not found")
+    return _row_to_contact(row)
 
 
 app.include_router(v1)
