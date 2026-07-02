@@ -32,8 +32,25 @@ from outreach.db import get_conn
 
 log = logging.getLogger("outreach.export.plan_batches")
 
-PROX_ORDER = ["T1", "T2", "T3", "T4", "dealer"]
+# Send order (GB 2026-07-03): geo band is PRIMARY, tier is secondary.
+#   Band  AU   = .au domains           — Australian, the real audience; sent first.
+#         COM  = generic gTLDs (.com…) — many AU importers use a global address; kept, mid.
+#         INTL = country-code TLDs      — obvious overseas HQ (.de/.co.uk/.co.jp/…); pushed
+#                                         right down (off-audience + EU/UK legal exposure).
+# Within a band, tier order puts DEALERS first (GB's core readership), OEMs (T1) next, then
+# T2-T4. So batches 1-2 are AU dealers; OEMs stay in the plan but rank below dealers, and
+# overseas-regional contacts trail the whole campaign. send_group = "<BAND>-<TIER>-B<NN>".
+BAND_ORDER = ["AU", "COM", "INTL"]
+PROX_ORDER = ["dealer", "T1", "T2", "T3", "T4"]
 TIER_LABEL = {"T1": "T1", "T2": "T2", "T3": "T3", "T4": "T4", "dealer": "DLR"}
+
+
+def geo_band(domain: str) -> str:
+    d = (domain or "").lower().split(";")[0].strip()
+    if d.endswith(".au"):
+        return "AU"
+    tld = d.rsplit(".", 1)[-1] if "." in d else d
+    return "INTL" if len(tld) == 2 else "COM"   # 2-char final label = ccTLD (overseas)
 RAMP_STEP = 50                      # +50 per send, restarts per tier
 RAMP_CAP = 250                      # plateau at 250 (GB 2026-07-03, option B)
 BATCH_FLOOR = 50                    # coalesce any sub-floor tail batch
@@ -72,11 +89,12 @@ def run_plan_batches(ramp: list[int] | None = None, include_inferred: bool = Fal
         global_bn = 0
         id2dom = {r["id"]: r["domain"] for r in rows}
 
-        for tier in PROX_ORDER:
-            trows = [r for r in rows if r["tier"] == tier]
+        for band in BAND_ORDER:
+          for tier in PROX_ORDER:
+            trows = [r for r in rows if r["tier"] == tier and geo_band(r["domain"]) == band]
             if not trows:
                 continue
-            # per-domain queues within the tier, direct-first
+            # per-domain queues within the band+tier, direct-first
             trows.sort(key=lambda r: 0 if r["confidence"] == "direct" else 1)
             dq: dict[str, deque] = defaultdict(deque)
             for r in trows:
@@ -137,7 +155,7 @@ def run_plan_batches(ramp: list[int] | None = None, include_inferred: bool = Fal
 
             for k, chunk in enumerate(tier_batches, 1):
                 global_bn += 1
-                sg = f"{TIER_LABEL[tier]}-B{k:02d}"
+                sg = f"{band}-{TIER_LABEL[tier]}-B{k:02d}"
                 assignments.append((global_bn, sg, chunk))
 
         for gbn, sg, chunk in assignments:
