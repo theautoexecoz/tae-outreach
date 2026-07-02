@@ -115,6 +115,18 @@ def cmd_suppress(args):
     )
 
 
+def cmd_classify_proximity(args):
+    from outreach.enrich.proximity import run_classify_proximity
+    s = run_classify_proximity()
+    c = s["classified"]
+    ip = s["in_play_emailable"]
+    print(
+        "\nProximity classification (§4b):\n"
+        f"  all contacts : dealer {c['dealer']}  T1 {c['T1']}  T2 {c['T2']}  T3 {c['T3']}  T4 {c['T4']}\n"
+        f"  in_play emailable : " + "  ".join(f"{k} {ip.get(k, 0)}" for k in ("dealer", "T1", "T2", "T3", "T4")) + "\n"
+    )
+
+
 def cmd_wp_dedup(args):
     from outreach.enrich.wp_dedup import run_wp_dedup
     s = run_wp_dedup(args.emails_file)
@@ -227,6 +239,8 @@ def main():
     p_wp = sub.add_parser("wp-dedup", help="§2b: rule out contacts that are current/past WP/MemberPress accounts")
     p_wp.add_argument("--emails-file", default="data/wp-member-emails.txt", help="file of WP account emails, one per line")
 
+    sub.add_parser("classify-proximity", help="§4b: tag contacts dealer/T1-T4 industry proximity for batch ordering")
+
     sub.add_parser("ledger-refresh", help="§3 ledger: backfill company + derive disposition/ruled_out from suppressed+cm_status")
     sub.add_parser("stats", help="show pipeline statistics")
     sub.add_parser("migrate", help="run database migrations")
@@ -253,6 +267,7 @@ def main():
         "ooo-harvest": cmd_ooo_harvest,
         "newspress-harvest": cmd_newspress_harvest,
         "wp-dedup": cmd_wp_dedup,
+        "classify-proximity": cmd_classify_proximity,
         "ledger-refresh": cmd_ledger_refresh,
         "stats": cmd_stats,
         "migrate": cmd_migrate,
