@@ -115,6 +115,22 @@ def cmd_suppress(args):
     )
 
 
+def cmd_plan_batches(args):
+    from outreach.export.plan_batches import run_plan_batches
+    ramp = [int(x) for x in args.ramp.split(",")] if args.ramp else None
+    s = run_plan_batches(ramp=ramp, include_inferred=args.include_inferred,
+                         max_per_domain=args.max_per_domain)
+    print(
+        f"\nplan-batches (§4b) — {s['sendable']} sendable "
+        + ("(GREEN/direct only)" if not args.include_inferred else "(incl. inferred)")
+        + f" → {s['batches']} batches (NO SEND — plan only):\n"
+        f"  {'batch':>5} {'size':>5} {'T1':>4} {'T2':>4} {'T3':>4} {'T4':>4} {'dealer':>7} {'max/domain':>11}"
+    )
+    for r in s["rows"]:
+        print(f"  {r['b']:>5} {r['n']:>5} {r['t1']:>4} {r['t2']:>4} {r['t3']:>4} {r['t4']:>4} {r['dealer']:>7} {r['max_per_domain']:>11}")
+    print()
+
+
 def cmd_classify_proximity(args):
     from outreach.enrich.proximity import run_classify_proximity
     s = run_classify_proximity()
@@ -241,6 +257,11 @@ def main():
 
     sub.add_parser("classify-proximity", help="§4b: tag contacts dealer/T1-T4 industry proximity for batch ordering")
 
+    p_pb = sub.add_parser("plan-batches", help="§4b: assign export_batch — proximity-ordered, domain-staggered, ramped (no send)")
+    p_pb.add_argument("--ramp", default="", help="comma batch sizes, e.g. 50,100,200,300,500 (default); last repeats")
+    p_pb.add_argument("--include-inferred", action="store_true", help="also batch inferred/guessed (default GREEN/direct only)")
+    p_pb.add_argument("--max-per-domain", type=int, default=5, help="max contacts of one domain per batch (default 5)")
+
     sub.add_parser("ledger-refresh", help="§3 ledger: backfill company + derive disposition/ruled_out from suppressed+cm_status")
     sub.add_parser("stats", help="show pipeline statistics")
     sub.add_parser("migrate", help="run database migrations")
@@ -268,6 +289,7 @@ def main():
         "newspress-harvest": cmd_newspress_harvest,
         "wp-dedup": cmd_wp_dedup,
         "classify-proximity": cmd_classify_proximity,
+        "plan-batches": cmd_plan_batches,
         "ledger-refresh": cmd_ledger_refresh,
         "stats": cmd_stats,
         "migrate": cmd_migrate,
