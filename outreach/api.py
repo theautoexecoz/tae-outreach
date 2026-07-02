@@ -426,35 +426,34 @@ def sends(days: int = Query(30, ge=1, le=365)):
     return _sends(days)
 
 
-class FlagBody(BaseModel):
-    stale: bool = True
-
-
 @v1.post("/items/{contact_id}/flag", response_model=Contact)
-def flag_contact(contact_id: int, body: Optional[FlagBody] = None):
-    """Cockpit stale-flag (left employer / outdated). stale=true suppresses the
-    contact (suppress_reason='left_employer') so it drops from planning + export;
-    stale=false undoes it (only when it was a left_employer flag). Returns the
-    updated contact for the HTMX row-swap — same /items/{id}/{action} shape the
-    scrapers room uses."""
-    stale = True if body is None else body.stale
+def flag_contact(contact_id: int):
+    """Cockpit stale-flag TOGGLE (left employer / outdated) — same /items/{id}/{action}
+    shape the scrapers room uses. If the contact is currently a left_employer flag it
+    is cleared (back to in_play); otherwise it is suppressed as left_employer so it
+    drops from planning + export. The server derives direction from current state, so
+    a checkbox-on-change needs no payload. Returns the updated contact for the row-swap."""
     with get_conn() as conn:
         with conn.cursor() as cur:
-            if stale:
+            cur.execute("SELECT suppress_reason FROM contacts WHERE id = %s", (contact_id,))
+            cur_row = cur.fetchone()
+            if not cur_row:
+                raise HTTPException(status_code=404, detail="contact not found")
+            if cur_row["suppress_reason"] == "left_employer":
                 cur.execute(
                     """UPDATE contacts
-                       SET suppressed = true, suppress_reason = 'left_employer',
-                           disposition = 'ruled_out', ruled_out_stage = 'left_employer',
-                           ruled_out_reason = 'flagged in cockpit — left employer / outdated'
+                       SET suppressed = false, suppress_reason = NULL,
+                           disposition = 'in_play', ruled_out_stage = NULL, ruled_out_reason = NULL
                        WHERE id = %s""",
                     (contact_id,),
                 )
             else:
                 cur.execute(
                     """UPDATE contacts
-                       SET suppressed = false, suppress_reason = NULL,
-                           disposition = 'in_play', ruled_out_stage = NULL, ruled_out_reason = NULL
-                       WHERE id = %s AND suppress_reason = 'left_employer'""",
+                       SET suppressed = true, suppress_reason = 'left_employer',
+                           disposition = 'ruled_out', ruled_out_stage = 'left_employer',
+                           ruled_out_reason = 'flagged in cockpit — left employer / outdated'
+                       WHERE id = %s""",
                     (contact_id,),
                 )
             cur.execute(
