@@ -124,10 +124,10 @@ def cmd_plan_batches(args):
         f"\nplan-batches (§4b) — {s['sendable']} sendable "
         + ("(GREEN/direct only)" if not args.include_inferred else "(incl. inferred)")
         + f" → {s['batches']} batches (NO SEND — plan only):\n"
-        f"  {'batch':>5} {'size':>5} {'T1':>4} {'T2':>4} {'T3':>4} {'T4':>4} {'dealer':>7} {'max/domain':>11}"
+        f"  {'#':>3} {'send_group':>11} {'size':>5} {'T1':>4} {'T2':>4} {'T3':>4} {'T4':>4} {'dealer':>7} {'doms':>5} {'/dom':>5}"
     )
     for r in s["rows"]:
-        print(f"  {r['b']:>5} {r['n']:>5} {r['t1']:>4} {r['t2']:>4} {r['t3']:>4} {r['t4']:>4} {r['dealer']:>7} {r['max_per_domain']:>11}")
+        print(f"  {r['b']:>3} {r['send_group']:>11} {r['n']:>5} {r['t1']:>4} {r['t2']:>4} {r['t3']:>4} {r['t4']:>4} {r['dealer']:>7} {r['domains']:>5} {r['max_per_domain']:>5}")
     print()
 
 
