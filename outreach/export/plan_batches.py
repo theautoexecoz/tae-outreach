@@ -14,10 +14,11 @@ Rules (GB 2026-07-03, "+50 growth, tier-homogeneous"):
   - Within a tier, domain-staggered (round-robin across domains, biggest first)
     so no batch blasts one domain; per-domain cap = at most `max_per_domain`
     (default 5) of any one domain per batch (overflow spills to later batches).
-  - Size = a +50 RAMP that restarts per tier: 50, 100, 150, 200, 250, … (uncapped)
-    to warm the new reach.theautoexec.com sending domain. Between batches: 48h +
-    the cockpit stop-lines. The domain cap can end a batch below its ramp target —
-    that's fine. Pass an explicit `ramp` list to override the +50 default.
+  - Size = a +50 RAMP that restarts per tier and plateaus at 250:
+    50, 100, 150, 200, 250, 250, … to warm the new reach.theautoexec.com sending
+    domain. Between batches: 48h + the cockpit stop-lines. Any sub-50 tail batch
+    (deep-domain drainage under the per-domain cap) is coalesced back so there are
+    no dribble sends. Pass an explicit `ramp` list to override the +50 default.
 
   send_group = "<TIER>-B<NN>" (dealer → DLR), per-tier batch number, zero-padded.
   export_batch = global send order (1..N) across all tiers, for stable ordering.
@@ -33,15 +34,21 @@ log = logging.getLogger("outreach.export.plan_batches")
 
 PROX_ORDER = ["T1", "T2", "T3", "T4", "dealer"]
 TIER_LABEL = {"T1": "T1", "T2": "T2", "T3": "T3", "T4": "T4", "dealer": "DLR"}
-RAMP_STEP = 50                      # +50 per send, uncapped, restarts per tier
-DEFAULT_MAX_PER_DOMAIN = 5
+RAMP_STEP = 50                      # +50 per send, restarts per tier
+RAMP_CAP = 250                      # plateau at 250 (GB 2026-07-03, option B)
+BATCH_FLOOR = 50                    # coalesce any sub-floor tail batch
+DEFAULT_MAX_PER_DOMAIN = 5          # strict during warming (first WARMING_BATCHES)
+WARMING_BATCHES = 3                 # per tier: batches 1-3 hold the strict cap
+TAIL_DOMAIN_MULT = 2               # post-warming per-domain cap = 2x (drains deep
+                                    # domains faster, shortening the tail — still bounded)
+MERGE_DOMAIN_CEIL = 12             # a floor-merge may not push any domain past this
 
 
 def _target(tier_batch_i: int, ramp: list[int] | None) -> int:
     """Size for the tier_batch_i-th (0-indexed) batch within a tier."""
     if ramp:
         return ramp[tier_batch_i] if tier_batch_i < len(ramp) else ramp[-1]
-    return (tier_batch_i + 1) * RAMP_STEP
+    return min((tier_batch_i + 1) * RAMP_STEP, RAMP_CAP)
 
 
 def run_plan_batches(ramp: list[int] | None = None, include_inferred: bool = False,
@@ -63,6 +70,7 @@ def run_plan_batches(ramp: list[int] | None = None, include_inferred: bool = Fal
         # (global_batch_no, send_group_label, [contact_ids]) in send order
         assignments: list[tuple[int, str, list[int]]] = []
         global_bn = 0
+        id2dom = {r["id"]: r["domain"] for r in rows}
 
         for tier in PROX_ORDER:
             trows = [r for r in rows if r["tier"] == tier]
@@ -76,9 +84,13 @@ def run_plan_batches(ramp: list[int] | None = None, include_inferred: bool = Fal
             # biggest domain first so the giants spread across many batches
             active = sorted(dq, key=lambda d: -len(dq[d]))
 
-            tier_bn = 0
+            tier_batches: list[list[int]] = []
+            batch_i = 0
             while any(dq[d] for d in active):
-                tgt = _target(tier_bn, ramp)
+                tgt = _target(batch_i, ramp)
+                # strict per-domain cap for the warming head; relaxed (but still
+                # bounded) after, so deep domains drain faster and the tail is short.
+                cap = max_per_domain if batch_i < WARMING_BATCHES else max_per_domain * TAIL_DOMAIN_MULT
                 cur: list[int] = []
                 cur_dom: dict[str, int] = defaultdict(int)
                 while len(cur) < tgt:
@@ -86,7 +98,7 @@ def run_plan_batches(ramp: list[int] | None = None, include_inferred: bool = Fal
                     for d in active:
                         if len(cur) >= tgt:
                             break
-                        if dq[d] and cur_dom[d] < max_per_domain:
+                        if dq[d] and cur_dom[d] < cap:
                             cur.append(dq[d].popleft())
                             cur_dom[d] += 1
                             progressed = True
@@ -94,10 +106,39 @@ def run_plan_batches(ramp: list[int] | None = None, include_inferred: bool = Fal
                         break
                 if not cur:
                     break
-                tier_bn += 1
+                tier_batches.append(cur)
+                batch_i += 1
+
+            # fold a sub-floor tail batch into its predecessor, but never push a
+            # domain past MERGE_DOMAIN_CEIL — any contact that would breach stays
+            # behind as a small residual (better a short residual than a blast).
+            while len(tier_batches) > 1 and len(tier_batches[-1]) < BATCH_FLOOR:
+                tail = tier_batches.pop()
+                prev = tier_batches[-1]
+                pdom: dict[str, int] = defaultdict(int)
+                for cid in prev:
+                    pdom[id2dom[cid]] += 1
+                residual: list[int] = []
+                for cid in tail:
+                    if pdom[id2dom[cid]] < MERGE_DOMAIN_CEIL:
+                        prev.append(cid)
+                        pdom[id2dom[cid]] += 1
+                    else:
+                        residual.append(cid)
+                if residual:
+                    tier_batches.append(residual)   # couldn't all fit — keep the rest
+                    break
+
+            # swallow any trivially small leftover (< 10) into the previous batch;
+            # a whole send for 2-3 contacts isn't worth it. Accepts a minor
+            # per-domain overage on these late, post-warming sends.
+            while len(tier_batches) > 1 and len(tier_batches[-1]) < 10:
+                tier_batches[-2].extend(tier_batches.pop())
+
+            for k, chunk in enumerate(tier_batches, 1):
                 global_bn += 1
-                sg = f"{TIER_LABEL[tier]}-B{tier_bn:02d}"
-                assignments.append((global_bn, sg, cur))
+                sg = f"{TIER_LABEL[tier]}-B{k:02d}"
+                assignments.append((global_bn, sg, chunk))
 
         for gbn, sg, chunk in assignments:
             conn.execute(
