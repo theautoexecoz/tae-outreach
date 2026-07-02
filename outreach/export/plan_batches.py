@@ -26,6 +26,7 @@ Rules (GB 2026-07-03, "+50 growth, tier-homogeneous"):
 Idempotent: clears and reassigns export_batch + send_group each run.
 """
 import logging
+import re
 from collections import defaultdict, deque
 
 from outreach.db import get_conn
@@ -39,10 +40,24 @@ log = logging.getLogger("outreach.export.plan_batches")
 #                                         right down (off-audience + EU/UK legal exposure).
 # Within a band, tier order puts DEALERS first (GB's core readership), OEMs (T1) next, then
 # T2-T4. So batches 1-2 are AU dealers; OEMs stay in the plan but rank below dealers, and
-# overseas-regional contacts trail the whole campaign. send_group = "<BAND>-<TIER>-B<NN>".
+# overseas-regional contacts trail the whole campaign.
+# On top of that, generic ROLE/department inboxes (sales@, service@, info@, sales.department@)
+# are pushed to the very back of the queue — kept, not suppressed (GB 2026-07-03), but sent
+# only after every real person, since they're shared inboxes not individuals. Real people
+# get send_group "<BAND>-<TIER>-B<NN>"; role inboxes get "ROLE-<BAND>-<TIER>-B<NN>".
 BAND_ORDER = ["AU", "COM", "INTL"]
 PROX_ORDER = ["dealer", "T1", "T2", "T3", "T4"]
 TIER_LABEL = {"T1": "T1", "T2": "T2", "T3": "T3", "T4": "T4", "dealer": "DLR"}
+
+# a functional/department inbox local-part, not a person (bounded tokens). Deprioritise
+# only, so over-matching is cheap — a mis-flagged person is merely sent later, never dropped.
+ROLE_INBOX_RE = re.compile(
+    r"(^|[._-])(sales|parts|service|servicing|enquir|enquiries|admin|info|information|contact|"
+    r"reception|accounts?|warranty|fleet|general|office|reservations?|newvehicles?|usedvehicles?|"
+    r"newcars?|usedcars?|preowned|leads?|bdc|department|dept|workshop|bookings?|aftersales|"
+    r"customercare|customerservice|showroom|principal|manager|consultant|coordinator|"
+    r"representative|noreply|no-reply|donotreply)([._-]|$)"
+)
 
 
 def geo_band(domain: str) -> str:
@@ -51,6 +66,10 @@ def geo_band(domain: str) -> str:
         return "AU"
     tld = d.rsplit(".", 1)[-1] if "." in d else d
     return "INTL" if len(tld) == 2 else "COM"   # 2-char final label = ccTLD (overseas)
+
+
+def is_role_inbox(email: str) -> bool:
+    return bool(ROLE_INBOX_RE.search((email or "").split("@")[0].lower()))
 RAMP_STEP = 50                      # +50 per send, restarts per tier
 RAMP_CAP = 250                      # plateau at 250 (GB 2026-07-03, option B)
 BATCH_FLOOR = 50                    # coalesce any sub-floor tail batch
@@ -78,7 +97,7 @@ def run_plan_batches(ramp: list[int] | None = None, include_inferred: bool = Fal
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT id, COALESCE(proximity_tier, 'T4') AS tier, "
-            "       COALESCE(email_domain, '?') AS domain, confidence "
+            "       COALESCE(email_domain, '?') AS domain, confidence, email "
             f"FROM contacts WHERE {cond}"
         ).fetchall()
         conn.execute("UPDATE contacts SET export_batch = NULL, send_group = NULL "
@@ -89,9 +108,13 @@ def run_plan_batches(ramp: list[int] | None = None, include_inferred: bool = Fal
         global_bn = 0
         id2dom = {r["id"]: r["domain"] for r in rows}
 
-        for band in BAND_ORDER:
-          for tier in PROX_ORDER:
-            trows = [r for r in rows if r["tier"] == tier and geo_band(r["domain"]) == band]
+        # real people first (role_flag=False), then role inboxes (role_flag=True) at the back;
+        # within each, band (AU→COM→INTL) then tier (dealer→T1→…). One flat ordered sweep so
+        # the per-group build body stays a single loop level.
+        group_order = [(rf, b, t) for rf in (False, True) for b in BAND_ORDER for t in PROX_ORDER]
+        for role_flag, band, tier in group_order:
+            trows = [r for r in rows if r["tier"] == tier and geo_band(r["domain"]) == band
+                     and is_role_inbox(r["email"]) == role_flag]
             if not trows:
                 continue
             # per-domain queues within the band+tier, direct-first
@@ -155,7 +178,7 @@ def run_plan_batches(ramp: list[int] | None = None, include_inferred: bool = Fal
 
             for k, chunk in enumerate(tier_batches, 1):
                 global_bn += 1
-                sg = f"{band}-{TIER_LABEL[tier]}-B{k:02d}"
+                sg = f"{'ROLE-' if role_flag else ''}{band}-{TIER_LABEL[tier]}-B{k:02d}"
                 assignments.append((global_bn, sg, chunk))
 
         for gbn, sg, chunk in assignments:
