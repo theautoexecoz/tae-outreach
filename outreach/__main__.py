@@ -216,6 +216,20 @@ def cmd_export(args):
     export_csv(args.output, all_contacts=args.all)
 
 
+def cmd_dedupe_domains(args):
+    from outreach.enrich.dedupe_domains import run_dedupe_domains
+    s = run_dedupe_domains(dry_run=not args.apply)
+    tag = "APPLIED — suppressed" if s["applied"] else "DRY-RUN — would suppress"
+    print(f"\ndedupe-domains ({tag}): {s['people']} people, {s['redundant']} redundant copies")
+    for x in s["samples"]:
+        print(f"  {x['person']:24} keep {x['keep']}")
+        for d in x["drop"]:
+            print(f"  {'':24}  drop {d}")
+    if not s["applied"] and s["redundant"]:
+        print("\n  (dry-run — re-run with --apply to suppress, then re-run plan-batches)")
+    print()
+
+
 def cmd_flag_stale(args):
     from outreach.db import get_conn
     ids = [int(x) for x in args.ids.split(",") if x.strip()]
@@ -297,6 +311,9 @@ def main():
     p_export.add_argument("--all", action="store_true",
                           help="dump every contact with an email (incl. CM-matched/suppressed) for review")
 
+    p_dd = sub.add_parser("dedupe-domains", help="suppress cross-domain same-person duplicates (keeps one copy)")
+    p_dd.add_argument("--apply", action="store_true", help="write suppressions (default: dry-run report only)")
+
     p_flag = sub.add_parser("flag-stale", help="suppress contacts as left-employer/outdated (cockpit stale cull, CLI path)")
     p_flag.add_argument("--ids", default="", help="comma-separated contact ids")
     p_flag.add_argument("--emails", default="", help="comma-separated emails (case-insensitive)")
@@ -325,6 +342,7 @@ def main():
         "stats": cmd_stats,
         "migrate": cmd_migrate,
         "export": cmd_export,
+        "dedupe-domains": cmd_dedupe_domains,
         "flag-stale": cmd_flag_stale,
     }
     handlers[args.command](args)
