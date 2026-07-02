@@ -115,6 +115,17 @@ def cmd_suppress(args):
     )
 
 
+def cmd_wp_dedup(args):
+    from outreach.enrich.wp_dedup import run_wp_dedup
+    s = run_wp_dedup(args.emails_file)
+    print(
+        f"\nWP/MemberPress dedup (§2b) — {s['wp_email_set']} WP account emails:\n"
+        f"  contacts matching WP : {s['contacts_matched']:>5}  (incl. already-excluded)\n"
+        f"  newly ruled_out      : {s['newly_ruled_out']:>5}  (were in_play)\n"
+        f"  wp-member total      : {s['wp_member_total']:>5}  by source {s['by_source']}\n"
+    )
+
+
 def cmd_ledger_refresh(args):
     from outreach.ledger import run_ledger_refresh
     s = run_ledger_refresh()
@@ -213,6 +224,9 @@ def main():
     p_np.add_argument("--id", type=int, default=None, help="fetch+parse a single public release id (no cookie needed) — testing")
     p_np.add_argument("--dry-run", action="store_true", help="parse + report, write nothing")
 
+    p_wp = sub.add_parser("wp-dedup", help="§2b: rule out contacts that are current/past WP/MemberPress accounts")
+    p_wp.add_argument("--emails-file", default="data/wp-member-emails.txt", help="file of WP account emails, one per line")
+
     sub.add_parser("ledger-refresh", help="§3 ledger: backfill company + derive disposition/ruled_out from suppressed+cm_status")
     sub.add_parser("stats", help="show pipeline statistics")
     sub.add_parser("migrate", help="run database migrations")
@@ -238,6 +252,7 @@ def main():
         "suppress": cmd_suppress,
         "ooo-harvest": cmd_ooo_harvest,
         "newspress-harvest": cmd_newspress_harvest,
+        "wp-dedup": cmd_wp_dedup,
         "ledger-refresh": cmd_ledger_refresh,
         "stats": cmd_stats,
         "migrate": cmd_migrate,
