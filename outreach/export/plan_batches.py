@@ -33,20 +33,27 @@ from outreach.db import get_conn
 
 log = logging.getLogger("outreach.export.plan_batches")
 
-# Send order (GB 2026-07-03): geo band is PRIMARY, tier is secondary.
-#   Band  AU   = .au domains           — Australian, the real audience; sent first.
-#         COM  = generic gTLDs (.com…) — many AU importers use a global address; kept, mid.
-#         INTL = country-code TLDs      — obvious overseas HQ (.de/.co.uk/.co.jp/…); pushed
-#                                         right down (off-audience + EU/UK legal exposure).
-# Within a band, tier order puts DEALERS first (GB's core readership), OEMs (T1) next, then
-# T2-T4. So batches 1-2 are AU dealers; OEMs stay in the plan but rank below dealers, and
-# overseas-regional contacts trail the whole campaign.
+# Send order (GB 2026-07-08, supersedes the 2026-07-03 dealers-first ordering below):
+# OEM (T1) first, restricted to domains that read as a car brand AND are .au or generic
+# .com — i.e. band AU then COM, explicitly excluding INTL (.co.nz/.co.uk/… regional HQs)
+# from this first phase. Once AU+COM T1 is exhausted, dealers (any band). Then everything
+# else — T2-T4 across all bands, plus the T1-INTL contacts excluded from phase 1 land here
+# too (still OEM, just not .au/.com).
+#   Band  AU   = .au domains           — Australian, the real audience.
+#         COM  = generic gTLDs (.com…) — many AU importers use a global address.
+#         INTL = country-code TLDs      — obvious overseas HQ (.de/.co.uk/.co.jp/…); off-audience.
 # On top of that, generic ROLE/department inboxes (sales@, service@, info@, sales.department@)
 # are pushed to the very back of the queue — kept, not suppressed (GB 2026-07-03), but sent
 # only after every real person, since they're shared inboxes not individuals. Real people
 # get send_group "<BAND>-<TIER>-B<NN>"; role inboxes get "ROLE-<BAND>-<TIER>-B<NN>".
-BAND_ORDER = ["AU", "COM", "INTL"]
-PROX_ORDER = ["dealer", "T1", "T2", "T3", "T4"]
+GEO_TIER_ORDER = [
+    ("AU", "T1"), ("COM", "T1"),                       # phase 1: OEM, AU/COM only
+    ("AU", "dealer"), ("COM", "dealer"), ("INTL", "dealer"),  # phase 2: dealers, any band
+    ("AU", "T2"), ("COM", "T2"), ("INTL", "T2"),        # phase 3: the rest, tier order T2-T4
+    ("AU", "T3"), ("COM", "T3"), ("INTL", "T3"),
+    ("AU", "T4"), ("COM", "T4"), ("INTL", "T4"),
+    ("INTL", "T1"),                                     # OEM-overseas, excluded from phase 1
+]
 TIER_LABEL = {"T1": "T1", "T2": "T2", "T3": "T3", "T4": "T4", "dealer": "DLR"}
 
 # a functional/department inbox local-part, not a person (bounded tokens). Deprioritise
@@ -109,9 +116,9 @@ def run_plan_batches(ramp: list[int] | None = None, include_inferred: bool = Fal
         id2dom = {r["id"]: r["domain"] for r in rows}
 
         # real people first (role_flag=False), then role inboxes (role_flag=True) at the back;
-        # within each, band (AU→COM→INTL) then tier (dealer→T1→…). One flat ordered sweep so
-        # the per-group build body stays a single loop level.
-        group_order = [(rf, b, t) for rf in (False, True) for b in BAND_ORDER for t in PROX_ORDER]
+        # within each, GEO_TIER_ORDER (OEM AU/COM → dealers → the rest). One flat ordered
+        # sweep so the per-group build body stays a single loop level.
+        group_order = [(rf, b, t) for rf in (False, True) for (b, t) in GEO_TIER_ORDER]
         for role_flag, band, tier in group_order:
             trows = [r for r in rows if r["tier"] == tier and geo_band(r["domain"]) == band
                      and is_role_inbox(r["email"]) == role_flag]
