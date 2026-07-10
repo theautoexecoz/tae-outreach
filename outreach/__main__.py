@@ -199,6 +199,21 @@ def cmd_stats(args):
         print(f"\nTotal emails: {emails['n']}")
 
 
+def cmd_verify(args):
+    from outreach.verify import run_dns, run_probe, summary
+    if args.probe:
+        stats = run_probe(limit_domains=args.limit or None, only_group=args.group or None, rps=args.rps)
+        print("SMTP probe (self-hosted domains):")
+    else:
+        stats = run_dns(limit=args.limit or None, only_group=args.group or None)
+        print("DNS pass (syntax + MX + provider + dead-domain + role):")
+    for k, v in sorted(stats.items(), key=lambda kv: -kv[1]):
+        print(f"  {k:16} {v}")
+    print("\nverify_status totals across the sendable pool:")
+    for r in summary():
+        print(f"  {r['verify_status']:16} {r['n']}")
+
+
 def cmd_migrate(args):
     from outreach.db import run_migration
     import os
@@ -304,6 +319,11 @@ def main():
 
     sub.add_parser("ledger-refresh", help="§3 ledger: backfill company + derive disposition/ruled_out from suppressed+cm_status")
     sub.add_parser("stats", help="show pipeline statistics")
+    p_ver = sub.add_parser("verify", help="verify email deliverability (DNS pass; --probe adds SMTP RCPT on self-hosted only)")
+    p_ver.add_argument("--probe", action="store_true", help="SMTP-probe self-hosted 'unknown' domains (touches external mail servers)")
+    p_ver.add_argument("--group", default="", help="limit to one send_group, e.g. AU-T1-B01")
+    p_ver.add_argument("--limit", type=int, default=0, help="cap rows (DNS) or domains (probe)")
+    p_ver.add_argument("--rps", type=float, default=0.5, help="probe: domains per second (default 0.5)")
     sub.add_parser("migrate", help="run database migrations")
 
     p_export = sub.add_parser("export", help="export the exportable mailout pool to CSV")
@@ -340,6 +360,7 @@ def main():
         "plan-batches": cmd_plan_batches,
         "ledger-refresh": cmd_ledger_refresh,
         "stats": cmd_stats,
+        "verify": cmd_verify,
         "migrate": cmd_migrate,
         "export": cmd_export,
         "dedupe-domains": cmd_dedupe_domains,
