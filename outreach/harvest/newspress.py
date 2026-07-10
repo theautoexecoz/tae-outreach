@@ -25,6 +25,7 @@ email index). A browser UA is required (a bot UA is served an empty SPA shell).
 import logging
 import re
 import time
+from datetime import date, datetime, timedelta, timezone
 from collections import Counter
 
 import httpx
@@ -194,6 +195,27 @@ def _parse_release(content_html: str) -> list[dict]:
     return list(found.values())
 
 
+
+# Newspress release-date field is discovered at runtime (schema varies); try the
+# usual names and parse ISO-ish. Returns a date or None.
+_DATE_FIELDS = ("published_at", "publishedAt", "release_date", "releaseDate",
+                "date", "created_at", "createdAt", "publish_date", "live_date")
+
+
+def _release_date(rel: dict) -> "date | None":
+    for k in _DATE_FIELDS:
+        v = rel.get(k)
+        if not v:
+            continue
+        txt = str(v)[:19].replace("T", " ").strip()
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(txt[:len(("%Y-%m-%d %H:%M:%S" if " " in txt else "%Y-%m-%d"))], fmt).date()
+            except ValueError:
+                continue
+    return None
+
+
 def _client(cookie: str) -> httpx.Client:
     headers = {"User-Agent": NEWSPRESS_UA, "Accept": "application/json",
                "Referer": NEWSPRESS_BASE.rstrip("/") + "/releases"}
@@ -253,7 +275,8 @@ def _list_ids(c: httpx.Client, max_pages: int, per_page: int = 100) -> list[int]
 
 
 def run_newspress_harvest(limit: int = 0, dry_run: bool = False,
-                          max_pages: int = 0, only_id: int | None = None) -> dict:
+                          max_pages: int = 0, only_id: int | None = None,
+                          months_back: int = 0) -> dict:
     """Harvest PR contacts from Newspress releases.
 
     only_id: fetch + parse a single public release (no cookie needed) — for testing.
@@ -261,6 +284,11 @@ def run_newspress_harvest(limit: int = 0, dry_run: bool = False,
     """
     stats = Counter()
     contacts: dict[str, dict] = {}
+    cutoff = None
+    if months_back:
+        today = datetime.now(timezone.utc).date()
+        cutoff = today - timedelta(days=int(months_back * 30.44))
+        log.info("recency gate: keeping releases on/after %s (last %d months)", cutoff, months_back)
 
     with _client(NEWSPRESS_COOKIE) as c:
         if only_id is not None:
@@ -291,6 +319,13 @@ def run_newspress_harvest(limit: int = 0, dry_run: bool = False,
                 stats["missing"] += 1
                 continue
             stats["releases"] += 1
+            rel_date = _release_date(rel)
+            if cutoff and rel_date and rel_date < cutoff:
+                # List is newest-first, so once a release predates the window we
+                # can stop entirely (contacts already collected are within it).
+                stats["out_of_window"] += 1
+                log.info("reached release older than %d months (%s) — stopping", months_back, rel_date)
+                break
             if i and i % 250 == 0:
                 log.info("progress %d/%d releases, %d unique contacts", i, len(ids), len(contacts))
             client_name = ((rel.get("client") or {}).get("name") or "").strip()
@@ -299,7 +334,13 @@ def run_newspress_harvest(limit: int = 0, dry_run: bool = False,
             for person in _parse_release(rel.get("content") or ""):
                 stats["candidates"] += 1
                 person["source_detail"] = detail
-                contacts.setdefault(person["email"], person)
+                person["source_date"] = rel_date
+                # keep the NEWEST release date if the same email recurs
+                existing = contacts.get(person["email"])
+                if existing is None:
+                    contacts[person["email"]] = person
+                elif rel_date and (existing.get("source_date") is None or rel_date > existing["source_date"]):
+                    existing["source_date"] = rel_date
             if only_id is None and i and NEWSPRESS_RPS > 0:
                 time.sleep(1.0 / NEWSPRESS_RPS)
 
@@ -319,13 +360,17 @@ def run_newspress_harvest(limit: int = 0, dry_run: bool = False,
             cur = conn.execute(
                 "INSERT INTO contacts "
                 "(dealership_id, full_name, first_name, last_name, role_raw, "
-                " role_normalised, email, email_domain, confidence, source, source_detail) "
-                "VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, 'direct', 'newspress', %s) "
-                "ON CONFLICT DO NOTHING RETURNING id",
+                " role_normalised, email, email_domain, confidence, source, source_detail, source_date) "
+                "VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, 'direct', 'newspress', %s, %s) "
+                "ON CONFLICT (email) WHERE email IS NOT NULL DO UPDATE SET "
+                "  source_date = GREATEST(contacts.source_date, EXCLUDED.source_date) "
+                "RETURNING (xmax = 0) AS inserted",
                 (p["full_name"], p["first_name"], p["last_name"], p["role_raw"],
-                 p["role_normalised"], p["email"], p["email_domain"], p["source_detail"]),
+                 p["role_normalised"], p["email"], p["email_domain"], p["source_detail"],
+                 p.get("source_date")),
             )
-            if cur.fetchone():
+            row = cur.fetchone()
+            if row and row.get("inserted"):
                 summary["inserted"] += 1
     log.info("newspress-harvest: %d releases → %d unique contacts, %d new inserted",
              stats["releases"], len(contacts), summary["inserted"])

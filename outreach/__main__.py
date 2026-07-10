@@ -89,7 +89,8 @@ def cmd_ooo_harvest(args):
 def cmd_newspress_harvest(args):
     from outreach.harvest.newspress import run_newspress_harvest
     s = run_newspress_harvest(limit=args.limit, dry_run=args.dry_run,
-                              max_pages=args.max_pages, only_id=args.id)
+                              max_pages=args.max_pages, only_id=args.id,
+                              months_back=args.months_back)
     print(
         f"\nNewspress harvest — {s['releases']} release(s) parsed"
         + (" [DRY RUN — no writes]" if s["dry_run"] else "") + ":\n"
@@ -201,6 +202,12 @@ def cmd_stats(args):
 
 def cmd_verify(args):
     from outreach.verify import run_dns, run_probe, summary
+    if args.suppress_dead:
+        from outreach.verify import suppress_undeliverable
+        r = suppress_undeliverable()
+        print(f"suppressed {r['newly_suppressed']} undeliverable {r['by_status']}; "
+              f"{r['total_suppressed']} suppressed total. Run `ledger-refresh` next.")
+        return
     if args.probe:
         stats = run_probe(limit_domains=args.limit or None, only_group=args.group or None, rps=args.rps)
         print("SMTP probe (self-hosted domains):")
@@ -212,6 +219,26 @@ def cmd_verify(args):
     print("\nverify_status totals across the sendable pool:")
     for r in summary():
         print(f"  {r['verify_status']:16} {r['n']}")
+
+
+def cmd_newspress_batch(args):
+    from outreach.enrich.newspress_batch import select_batch
+    r = select_batch(months_back=args.months, require_date=not args.allow_undated,
+                     send_group=args.group or None, apply=args.apply)
+    print(f"\nNewspress batch selection (last {args.months} months, healthy, never-subscriber):")
+    print(f"  candidates (email+cm dedup)      : {r['candidates_before_name_check']}")
+    print(f"  dropped on active-name match     : {r['dropped_active_name_match']}")
+    print(f"  BATCH SIZE                       : {r['batch_size']}"
+          + (f"  -> send_group {r.get('send_group')}" if r['applied'] else "  (dry-run)"))
+    if r['name_dropped_sample']:
+        print("  name-matched active subscribers (dropped):")
+        for x in r['name_dropped_sample']:
+            print(f"    {x['email']:<40} {x['name']}")
+    print("  batch sample:")
+    for x in r['batch_sample']:
+        print(f"    {x['email']:<40} {x['name'][:22]:<22} {x['domain']:<24} {x['date'] or '-':<11} {x['verify']}")
+    if not r['applied']:
+        print("\n  dry-run — re-run with --apply to stamp send_group.")
 
 
 def cmd_migrate(args):
@@ -302,6 +329,7 @@ def main():
     p_ooo.add_argument("--dry-run", action="store_true", help="parse + report, write nothing")
 
     p_np = sub.add_parser("newspress-harvest", help="harvest PR/marketing contacts from newspressaustralia.com releases")
+    p_np.add_argument("--months-back", dest="months_back", type=int, default=0, help="only releases within the last N months (0 = no gate); list is newest-first so it stops early")
     p_np.add_argument("--limit", type=int, default=0, help="cap number of releases processed")
     p_np.add_argument("--max-pages", type=int, default=0, help="cap release-list pagination")
     p_np.add_argument("--id", type=int, default=None, help="fetch+parse a single public release id (no cookie needed) — testing")
@@ -321,9 +349,15 @@ def main():
     sub.add_parser("stats", help="show pipeline statistics")
     p_ver = sub.add_parser("verify", help="verify email deliverability (DNS pass; --probe adds SMTP RCPT on self-hosted only)")
     p_ver.add_argument("--probe", action="store_true", help="SMTP-probe self-hosted 'unknown' domains (touches external mail servers)")
+    p_ver.add_argument("--suppress-dead", dest="suppress_dead", action="store_true", help="suppress dead_domain/bad_syntax/undeliverable contacts (then run ledger-refresh)")
     p_ver.add_argument("--group", default="", help="limit to one send_group, e.g. AU-T1-B01")
     p_ver.add_argument("--limit", type=int, default=0, help="cap rows (DNS) or domains (probe)")
     p_ver.add_argument("--rps", type=float, default=0.5, help="probe: domains per second (default 0.5)")
+    p_nb = sub.add_parser("newspress-batch", help="select the Newspress outreach batch (recency + CM email/name dedup + domain-trump)")
+    p_nb.add_argument("--months", type=int, default=12, help="recency window in months (default 12)")
+    p_nb.add_argument("--allow-undated", action="store_true", help="keep contacts with no source_date (default: require a date within the window)")
+    p_nb.add_argument("--group", default="", help="send_group label to stamp on --apply (default NP-B01)")
+    p_nb.add_argument("--apply", action="store_true", help="stamp send_group (default: dry-run)")
     sub.add_parser("migrate", help="run database migrations")
 
     p_export = sub.add_parser("export", help="export the exportable mailout pool to CSV")
@@ -361,6 +395,7 @@ def main():
         "ledger-refresh": cmd_ledger_refresh,
         "stats": cmd_stats,
         "verify": cmd_verify,
+        "newspress-batch": cmd_newspress_batch,
         "migrate": cmd_migrate,
         "export": cmd_export,
         "dedupe-domains": cmd_dedupe_domains,

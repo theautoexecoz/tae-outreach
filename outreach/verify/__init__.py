@@ -232,6 +232,34 @@ def _write(conn, cid, status, provider, mx, catchall, detail, keep_provider=Fals
     conn.execute(f"UPDATE contacts SET {', '.join(sets)} WHERE id = %(id)s", params)
 
 
+def suppress_undeliverable() -> dict:
+    """Suppress every provably-undeliverable contact the verifier found.
+
+    dead_domain (no MX / NXDOMAIN), bad_syntax and undeliverable (SMTP 550) are
+    facts, not judgements, so they are safe to suppress outright. Idempotent;
+    stamps a verify:<status> reason. Catch-all / gateway / unknown are NOT
+    touched — they are unverifiable, not bad. Run ledger-refresh afterwards to
+    flip disposition to ruled_out.
+    """
+    kill = ("dead_domain", "bad_syntax", "undeliverable")
+    with get_conn() as conn:
+        rows = conn.execute(
+            "UPDATE contacts SET suppressed = TRUE, "
+            "  suppress_reason = 'verify:' || verify_status "
+            "WHERE verify_status = ANY(%s) "
+            "  AND (NOT suppressed OR suppress_reason IS DISTINCT FROM 'verify:' || verify_status) "
+            "RETURNING email, verify_status",
+            (list(kill),),
+        ).fetchall()
+        by_status: dict[str, int] = {}
+        for r in rows:
+            by_status[r["verify_status"]] = by_status.get(r["verify_status"], 0) + 1
+        total = conn.execute("SELECT COUNT(*) AS n FROM contacts WHERE suppressed").fetchone()["n"]
+    log.info("suppressed %d undeliverable (%s); %d suppressed in total",
+             len(rows), by_status, total)
+    return {"newly_suppressed": len(rows), "by_status": by_status, "total_suppressed": total}
+
+
 def summary() -> list[dict]:
     with get_conn() as conn:
         return conn.execute(

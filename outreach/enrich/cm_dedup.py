@@ -131,6 +131,7 @@ def run_cm_dedup() -> dict:
                 )
 
     summary = {k: len(v) for k, v in buckets.items()}
+    summary["active_names_captured"] = capture_active_names(CM_API_KEY)
     summary["total_with_email"] = len(rows)
     log.info(
         "cm-dedup done: %d emails — active=%d unsubscribed=%d deleted=%d NEW(not_found)=%d",
@@ -138,3 +139,58 @@ def run_cm_dedup() -> dict:
         summary["deleted"], summary["not_found"],
     )
     return summary
+
+
+def name_key(full_or_first, last=None):
+    """Order-independent normalised key for matching a person by name.
+
+    Lowercased alpha tokens, sorted, joined. Returns "" if fewer than 2 tokens
+    (a single name is too weak to match on). "Jane Smith" == "Smith, Jane".
+    """
+    import re as _re
+    if last is not None:
+        raw = f"{full_or_first or ''} {last or ''}"
+    else:
+        raw = full_or_first or ""
+    raw = raw.replace(",", " ")
+    toks = [t for t in _re.sub(r"[^a-z ]", " ", raw.lower()).split() if len(t) > 1]
+    return " ".join(sorted(toks)) if len(toks) >= 2 else ""
+
+
+def capture_active_names(api_key: str) -> int:
+    """Populate cm_active_subscribers with (email, name, name_key) for every
+    ACTIVE subscriber, so Newspress contacts can be cross-checked by NAME. The
+    active-subscriber record trumps: a person already subscribing under any
+    address/domain is not cold-emailed again (GB, 2026-07-10). Idempotent."""
+    seen: dict[str, tuple] = {}
+    with _client(api_key) as c:
+        for cl in _get(c, "/clients.json"):
+            for lst in _get(c, f"/clients/{cl['ClientID']}/lists.json"):
+                page = 1
+                while True:
+                    data = _get(c, f"/lists/{lst['ListID']}/active.json",
+                                page=page, pagesize=PAGE_SIZE,
+                                orderfield="email", orderdirection="asc")
+                    for row in data.get("Results", []):
+                        em = (row.get("EmailAddress") or "").strip().lower()
+                        nm = (row.get("Name") or "").strip()
+                        if em:
+                            seen[em] = (nm, name_key(nm))
+                    if page >= (data.get("NumberOfPages", 1) or 1):
+                        break
+                    page += 1
+                    time.sleep(0.3)
+    with get_conn() as conn:
+        conn.execute("TRUNCATE cm_active_subscribers")
+        for em, (nm, key) in seen.items():
+            first, _, last = nm.partition(" ")
+            conn.execute(
+                "INSERT INTO cm_active_subscribers (email, first_name, last_name, name_key) "
+                "VALUES (%s, %s, %s, %s) ON CONFLICT (email) DO UPDATE SET "
+                "  first_name=EXCLUDED.first_name, last_name=EXCLUDED.last_name, "
+                "  name_key=EXCLUDED.name_key, captured_at=now()",
+                (em, first or None, last or None, key or None),
+            )
+    n_named = sum(1 for _e, (_n, k) in seen.items() if k)
+    log.info("captured %d active subscribers (%d with a usable name key)", len(seen), n_named)
+    return len(seen)
