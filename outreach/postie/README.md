@@ -33,3 +33,47 @@ into glenn@ Drafts, From `glenn@reach.theautoexec.com` (reach identity is set up
 disposition='in_play' AND cm_status='not_found'`, `ORDER BY export_batch`,
 LIMIT = the day's quota; then for those N: `UPDATE contacts SET
 disposition='sent', sent_at=CURRENT_DATE` (see migration `009_sent.sql`).
+
+## Daily runbook (copy-paste)
+
+GB runs Postie ~10am each working day with a quota N. From `~/Dev/taeN/tae-docs`
+(the mailtriage helper lives there); `POSTIE=/srv/docker/tae/tae-app-services/tae-outreach/outreach/postie`,
+`WORK=<a scratch dir>`, `N=<quota>`.
+
+```bash
+# 1. render the latest COMPLETED edition (status='completed', NOT max issue_number)
+docker exec tae_newsforge python3 -c "
+import asyncio; from app.database import async_session; from app.models import Issue
+from app.services.taedaily_compose import compose_edition_html; from sqlalchemy import select
+async def m():
+    async with async_session() as db:
+        i=(await db.execute(select(Issue).where(Issue.status=='completed').order_by(Issue.issue_number.desc()).limit(1))).scalar_one()
+        print(await compose_edition_html(db,i.id))
+asyncio.run(m())" > $WORK/edition.html
+
+# 2. build today's email (resolve merge tags + 3 trims + splice intro)
+python3 $POSTIE/build.py --edition $WORK/edition.html --intro $POSTIE/intro.html --out $WORK/postie-today.html
+
+# 3. select the next N prospects in priority order
+docker exec tae_outreach_db psql -U tae_outreach -d tae_outreach -tAF$'\t' -c "
+SELECT id,email FROM contacts
+WHERE confidence='direct' AND disposition='in_play' AND cm_status='not_found' AND email IS NOT NULL
+ORDER BY export_batch ASC, id ASC LIMIT $N;" > $WORK/batch.tsv
+
+# 4. one draft per prospect; collect the ids that succeeded
+: > $WORK/ok-ids.txt
+while IFS=$'\t' read -r cid email; do
+  out=$(python3 .claude/skills/mailtriage/imap_helper.py draft --account glenn \
+    --subject "A daily automotive briefing you might find useful" \
+    --from "Glenn Butler <glenn@reach.theautoexec.com>" --reply-to glenn@reach.theautoexec.com \
+    --to "$email" --html-file $WORK/postie-today.html --body-file $POSTIE/intro.txt 2>&1)
+  echo "$out" | grep -q '"appended_to"' && echo "$cid" >> $WORK/ok-ids.txt
+done < $WORK/batch.tsv
+
+# 5. flip exactly the drafted prospects to sent
+docker exec tae_outreach_db psql -U tae_outreach -d tae_outreach -c \
+  "UPDATE contacts SET disposition='sent', sent_at=CURRENT_DATE WHERE id IN ($(paste -sd, $WORK/ok-ids.txt)) AND disposition='in_play';"
+```
+
+GB reviews the drafts in Apple Mail and sends them (as the reach identity).
+Credentials for the helper come from `~/.claude/.env` (`TAE_GLENN_IMAP_PASSWORD`).
