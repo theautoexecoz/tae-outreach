@@ -9,8 +9,17 @@ run never depends on the temporary live `theautoexec.com/outreach/*.html` files.
   after `<body>`, in each day's rendered TAEDaily edition.
 - `intro.txt` — plain-text fallback for the multipart/alternative draft.
 
+- `build.py` — the pure transform (render-in → ready-to-draft-out): resolves CM
+  merge tags, trims the 3 elements, splices `intro.html`. Run it on the composed
+  edition each day; it is tested to be byte-identical to the hand-built output.
+  `python build.py --edition edition.html --intro intro.html --out postie-today.html`
+
 Daily edition source = NewsForge `compose_edition_html` of the latest
-`status='completed'` issue (streamlined `taedaily_base.html`, ~88 KB).
+`status='completed'` issue (streamlined `taedaily_base.html`, ~88 KB). **The
+composed edition carries raw CM `[if:MemberLevel=…]…[else]🔒 Members[endif]`
+merge tags** (CM resolves them at send; a manual glenn@ send does not) — `build.py`
+resolves the 8 locked-article blocks to their non-member `[else]` branch and
+leaves MSO `<!--[if mso]>` comments alone.
 **Trim three elements** from the day's copy before splicing (GB 2026-07-13;
 never edit taedaily_base.html itself):
   1. the "Forward to a friend or colleague" CTA just ahead of the first story;
