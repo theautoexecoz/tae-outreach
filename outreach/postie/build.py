@@ -78,7 +78,8 @@ def trim_three(html: str) -> str:
 def splice_intro(html: str, intro: str) -> str:
     i = html.index(WRAPPER_MARKER)
     out = html[:i] + intro + "\n" + html[i:]
-    if out.count("We found your publicly listed") != 1:
+    # copy-stable marker (survives We->I and other wording edits)
+    if out.count("publicly listed business contact details") != 1:
         raise SystemExit("intro splice sanity failed")
     return out
 
