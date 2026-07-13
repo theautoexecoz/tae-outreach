@@ -28,13 +28,19 @@ import argparse
 import re
 import sys
 
+PADLOCK = '\U0001f512'
 LAYOUT_ANCHOR = '<div class="layout one-col fixed-width stack"'
 WRAPPER_MARKER = '<table bgcolor="#ffffff" cellpadding="0" cellspacing="0" class="wrapper"'
 
 
 def resolve_member_tags(html: str) -> str:
-    """[if:MemberLevel=…]…[else]X[endif] -> X (the non-member branch)."""
-    out = re.sub(r'\[if:MemberLevel=.*?\[else\](.*?)\[endif\]', lambda m: m.group(1), html, flags=re.S)
+    """[if:MemberLevel=…]…[else]X[endif] -> X (the non-member branch), and strip
+    the padlock so the locked-article button reads just "Members" (GB 2026-07-13)."""
+    def _else(m):
+        text = m.group(1)
+        # strip the padlock so the locked-article button reads just "Members"
+        return text.replace(PADLOCK+'\xa0','').replace(PADLOCK+' ','').replace(PADLOCK,'')
+    out = re.sub(r'\[if:MemberLevel=.*?\[else\](.*?)\[endif\]', _else, html, flags=re.S)
     residue = re.findall(r'\[if:|\[elseif:|\[else\]', out)
     if residue:
         raise SystemExit(f"unresolved CM merge tags remain: {residue[:5]}")
