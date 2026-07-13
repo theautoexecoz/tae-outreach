@@ -86,6 +86,12 @@ def build_exclusion_sets(api_key: str) -> dict[str, set[str]]:
             lists = _get(c, f"/clients/{cl['ClientID']}/lists.json")
             for lst in lists:
                 lid, lname = lst["ListID"], lst["Name"]
+                # Outreach staging lists hold PROSPECTS we imported ourselves, not
+                # subscribers — counting them creates a catch-22 where batching a
+                # contact into CM marks it "already a subscriber" (GB, 2026-07-13).
+                if lname.startswith("Outreach-"):
+                    log.info("  %-34s SKIPPED (outreach staging list)", lname[:34])
+                    continue
                 for endpoint, status in STATE_ENDPOINTS.items():
                     emails = _dump_state(c, lid, endpoint)
                     if emails:
