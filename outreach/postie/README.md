@@ -77,3 +77,33 @@ docker exec tae_outreach_db psql -U tae_outreach -d tae_outreach -c \
 
 GB reviews the drafts in Apple Mail and sends them (as the reach identity).
 Credentials for the helper come from `~/.claude/.env` (`TAE_GLENN_IMAP_PASSWORD`).
+
+## Reach mailbox sweep (run after sends land)
+
+Cold-outreach auto-replies land at **glenn@reach.theautoexec.com** (the reach
+identity's From/Reply-To + envelope return-path), NOT in glenn@theautoexec.com.
+Run the sweep once a day (or when checking outreach health) to reconcile them
+into the DB. It reads the Maildir over the `ventraip-tae` SSH alias and writes to
+`tae_outreach_db`, so run it on the Bedrock **host**. Idempotent — safe to re-run.
+
+```bash
+python3 $POSTIE/reach_sweep.py --dry-run   # preview classification
+python3 $POSTIE/reach_sweep.py             # apply
+```
+
+- **Bounces** (NDRs / 550 recipient-not-found) → contact set `suppressed=true`,
+  `disposition='ruled_out'` (stage `bounce`) so it is **never re-sent**.
+- **Out-of-office** replies → the send was delivered, so the contact is NOT
+  suppressed; `ooo_at` is stamped and it stays `disposition='sent'`.
+
+**End-of-first-pass OOO follow-up (GB 2026-07-14):** once the whole first pass is
+sent, revisit the OOO cohort. Run `cm-dedup` to refresh `cm_status`, then:
+
+```bash
+# OOO contacts who never subscribed → risk one resend
+docker exec tae_outreach_db psql -U tae_outreach -d tae_outreach -c \
+  "SELECT full_name, email, send_group, ooo_at FROM contacts
+   WHERE ooo_at IS NOT NULL AND cm_status='not_found' ORDER BY ooo_at;"
+# to resend, flip them back into the sendable universe:
+#   UPDATE contacts SET disposition='in_play' WHERE ooo_at IS NOT NULL AND cm_status='not_found';
+```
