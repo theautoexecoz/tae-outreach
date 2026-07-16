@@ -40,6 +40,20 @@ GB runs Postie ~10am each working day with a quota N. From `~/Dev/taeN/tae-docs`
 (the mailtriage helper lives there); `POSTIE=/srv/docker/tae/tae-app-services/tae-outreach/outreach/postie`,
 `WORK=<a scratch dir>`, `N=<quota>`.
 
+**Selection rules (GB 2026-07-16 — apply before drafting):**
+1. **Max 2 recipients per email domain per day's batch.** Capped-out contacts stay
+   `in_play` and dribble out on later days (step 3's plain LIMIT is NOT enough —
+   apply the cap over the ordered queue).
+2. **GB approves the day's list before any draft is made.** Present the next N+5
+   candidates (20 for N=15) so he can rule some out and the batch still fills.
+3. Role/shared inboxes (sales@, parts@, reception@, customersupport@, …) are never
+   prospects — rule out `role_or_list_inbox` on sight, even when a person's name
+   is attached to the row.
+4. Cross-domain check: a prospect may already be a CM subscriber under another
+   domain of the same company (seen: vwga↔volkswagen.com.au, mgmotor↔smil.com,
+   toyota↔lexus/gmail). If found, mark `cm_status='active'`,
+   `ruled_out_stage='subscriber'` instead of drafting.
+
 ```bash
 # 1. render the latest COMPLETED edition (status='completed', NOT max issue_number)
 docker exec tae_newsforge python3 -c "
