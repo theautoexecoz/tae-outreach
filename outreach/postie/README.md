@@ -53,6 +53,20 @@ GB runs Postie ~10am each working day with a quota N. From `~/Dev/taeN/tae-docs`
    domain of the same company (seen: vwga↔volkswagen.com.au, mgmotor↔smil.com,
    toyota↔lexus/gmail). If found, mark `cm_status='active'`,
    `ruled_out_stage='subscriber'` instead of drafting.
+   **A dormant subscriber record does NOT protect the prospect (GB 2026-07-17).**
+   Check CM engagement before ruling out on a cross-domain `cm_status='active'`
+   hit: if that subscriber has *never interacted* with an edition, the record is
+   dead weight and the cold email still goes. First case: `david.fable@suzuki.com.au`
+   (active, zero interaction) did NOT rule out `david_fable@suzuki.com.au` (id 46140,
+   kept `in_play`). An **unsubscribed** cross-domain match is the opposite — always
+   rule out (`cm-unsubscribed`); Amy Hooper `ahooper@mmal.com` (id 45744) ruled out
+   the same day against `ahooper@mmal.com.au`.
+5. **Skip `source='newspress'`** — stale press bylines, GB call 2026-07-15 pending
+   the re-scrape (`TAE-2607-25`). The step-3 query below does not encode this; apply it.
+   Note `source='ooo_reply'` (a colleague named as the alternate contact in an auto-reply)
+   is a *different* vector and stays in the send universe, but its name parser emits
+   junk (`Dear Sender`, `Wednesday November`) — cosmetic only, the draft never merges
+   the name, but don't trust `full_name` from that source when judging a row.
 
 ```bash
 # 1. render the latest COMPLETED edition (status='completed', NOT max issue_number)
