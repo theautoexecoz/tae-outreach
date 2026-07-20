@@ -28,8 +28,10 @@ never edit taedaily_base.html itself):
      because you subscribed at theautoexec.com. Unsubscribe.") — the intro's
      "just delete this email" line is the cold-email opt-out instead.
 Draft via the mailtriage `imap_helper.py draft` (`--html-file/--from/--reply-to/--to`)
-into glenn@ Drafts, From `glenn@reach.theautoexec.com` (reach identity is set up
-+ tested in Apple Mail, GB 2026-07-13). Recipients: `confidence='direct' AND
+into glenn@ Drafts, From `glenn@theautoexec.com` (GB 2026-07-20: reach. identity
+retired for direct sends at personal scale — Outlook quarantined the cold
+subdomain and replies sat unwatched; the reach. DNS/DKIM stays in place in case
+bulk volume ever revives it). Recipients: `confidence='direct' AND
 disposition='in_play' AND cm_status='not_found'`, `ORDER BY export_batch`,
 LIMIT = the day's quota; then for those N: `UPDATE contacts SET
 disposition='sent', sent_at=CURRENT_DATE` (see migration `009_sent.sql`).
@@ -93,7 +95,7 @@ ORDER BY export_batch ASC, id ASC LIMIT $N;" > $WORK/batch.tsv
 while IFS=$'\t' read -r cid email; do
   out=$(python3 .claude/skills/mailtriage/imap_helper.py draft --account glenn \
     --subject "A daily automotive briefing you might find useful" \
-    --from "Glenn Butler <glenn@reach.theautoexec.com>" --reply-to glenn@reach.theautoexec.com \
+    --from "Glenn Butler <glenn@theautoexec.com>" --reply-to glenn@theautoexec.com \
     --to "$email" --html-file $WORK/postie-today.html --body-file $POSTIE/intro.txt 2>&1)
   echo "$out" | grep -q '"appended_to"' && echo "$cid" >> $WORK/ok-ids.txt
 done < $WORK/batch.tsv
@@ -103,15 +105,17 @@ docker exec tae_outreach_db psql -U tae_outreach -d tae_outreach -c \
   "UPDATE contacts SET disposition='sent', sent_at=CURRENT_DATE WHERE id IN ($(paste -sd, $WORK/ok-ids.txt)) AND disposition='in_play';"
 ```
 
-GB reviews the drafts in Apple Mail and sends them (as the reach identity).
+GB reviews the drafts in Apple Mail and sends them (as glenn@theautoexec.com).
 Credentials for the helper come from `~/.claude/.env` (`TAE_GLENN_IMAP_PASSWORD`).
 
-## Reach mailbox sweep (run after sends land)
+## Reach mailbox sweep (legacy wind-down)
 
-Cold-outreach auto-replies land at **glenn@reach.theautoexec.com** (the reach
-identity's From/Reply-To + envelope return-path), NOT in glenn@theautoexec.com.
-Run the sweep once a day (or when checking outreach health) to reconcile them
-into the DB. It reads the Maildir over the `ventraip-tae` SSH alias and writes to
+Sends from 2026-07-13 to 2026-07-17 went out From `glenn@reach.theautoexec.com`,
+so their bounces and auto-replies land in the reach Maildir, NOT glenn@. Keep
+running the sweep during morning triage until that mailbox drains and stays
+empty (~2 weeks after the last reach send), then retire this section. Sends from
+2026-07-20 onward reply straight to glenn@ and are covered by normal mailtriage.
+It reads the Maildir over the `ventraip-tae` SSH alias and writes to
 `tae_outreach_db`, so run it on the Bedrock **host**. Idempotent — safe to re-run.
 
 ```bash
