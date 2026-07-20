@@ -56,6 +56,10 @@ services:
     environment:
       DATABASE_DSN: postgresql://tae_outreach:${POSTGRES_PASSWORD}@db:5432/tae_outreach
       CT_OUTREACH_API_KEY: ${CT_OUTREACH_API_KEY}
+      # CLI runs (verify, cm-dedup) are exec'd in this always-up container, so it
+      # needs the CM credentials the one-shot `app` service already carries.
+      CM_API_KEY: ${CM_API_KEY}
+      CM_LIST_ID: ${CM_LIST_ID}
       TZ: Australia/Melbourne
       PYTHONUNBUFFERED: "1"
     volumes:
