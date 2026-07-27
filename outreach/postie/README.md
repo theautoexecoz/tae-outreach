@@ -38,14 +38,39 @@ disposition='sent', sent_at=CURRENT_DATE` (see migration `009_sent.sql`).
 
 ## Daily runbook (copy-paste)
 
-GB runs Postie ~10am each working day with a quota N. From `~/Dev/taeN/tae-docs`
+GB runs Postie ~10am each working day with a quota N (**N=25 as of GB 2026-07-28**;
+was 15 during the reach.→glenn@ switch). From `~/Dev/taeN/tae-docs`
 (the mailtriage helper lives there); `POSTIE=/srv/docker/tae/tae-app-services/tae-outreach/outreach/postie`,
 `WORK=<a scratch dir>`, `N=<quota>`.
+
+**Standing pre-run steps (GB 2026-07-28 — every run, before selection):**
+
+1. **Signups check** — run `cm-dedup` (live CM universe) and `wp-dedup` (feed it a
+   fresh `wp user list --field=user_email` export from VentraIP) so anyone who
+   signed up via CM or WP since the last run drops out of the pool the same day:
+   ```bash
+   docker exec tae_outreach_api python -m outreach cm-dedup
+   ssh ventraip-tae "cd public_html && wp user list --field=user_email" > $WORK/wp-emails.txt
+   docker exec -i tae_outreach_api sh -c 'cat > /tmp/wp-emails.txt' < $WORK/wp-emails.txt
+   docker exec tae_outreach_api python -m outreach wp-dedup --emails-file /tmp/wp-emails.txt
+   ```
+2. **RobotReplies harvest — PRIORITY SEND** (GB: freshest addresses). Run
+   `ooo-harvest` over editor@'s `TAE-RobotReplies` (inject `OOO_IMAP_PASSWORD`
+   from `~/.claude/.env` `TAE_EDITOR_IMAP_PASSWORD` via stdin — it is not in the
+   container env). Net-new delegates that come out clean vs CM + WP get
+   `export_batch=0` so they top the day's selection.
+3. **Delete the contents of TAE-RobotReplies after each day's ingest** (GB
+   2026-07-28, confirming the 2026-07-23 airlock doctrine): delete + expunge in
+   place, never move to Archive (Archive syncs into the mail-archiver and clogs
+   person-search; RobotReplies is excluded from archiver sync). The mailtriage
+   `ooo-to-robotreplies` rule refills it daily.
 
 **Selection rules (GB 2026-07-16 — apply before drafting):**
 1. **Max 2 recipients per email domain per day's batch.** Capped-out contacts stay
    `in_play` and dribble out on later days (step 3's plain LIMIT is NOT enough —
-   apply the cap over the ordered queue).
+   apply the cap over the ordered queue). **Dealer domains are distinct despite
+   being the same brand** (GB 2026-07-28): volvocarsfivedock vs volvocarsparramatta
+   are separate entities, each with its own ×2 allowance.
 2. **GB approves the day's list before any draft is made.** Present the next N+5
    candidates (20 for N=15) so he can rule some out and the batch still fills.
 3. Role/shared inboxes (sales@, parts@, reception@, customersupport@, …) are never
