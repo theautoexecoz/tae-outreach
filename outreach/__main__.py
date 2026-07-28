@@ -90,18 +90,30 @@ def cmd_newspress_harvest(args):
     from outreach.harvest.newspress import run_newspress_harvest
     s = run_newspress_harvest(limit=args.limit, dry_run=args.dry_run,
                               max_pages=args.max_pages, only_id=args.id,
-                              months_back=args.months_back)
+                              months_back=args.months_back,
+                              appointments=getattr(args, 'appointments', True))
     print(
         f"\nNewspress harvest — {s['releases']} release(s) parsed"
         + (" [DRY RUN — no writes]" if s["dry_run"] else "") + ":\n"
         f"  missing/404 releases : {s['missing']:>5}\n"
         f"  unique PR contacts   : {s['contacts']:>5}"
         + (f"  ({s['inserted']} inserted, rest already known)" if not s["dry_run"] else "") + "\n"
+        + f"  appointment releases : {s.get('appointment_releases', 0):>5}"
+          f"  naming {s.get('appointees_named', 0)} incoming people\n"
+        + f"  addresses EXTRAPOLATED: {s.get('extrapolated', 0):>4}"
+        + (f"  ({s['inserted_derived']} inserted)" if not s["dry_run"] else "")
+        + f"   [guesses — confidence='inferred', never sent by Postie]\n"
+        + (f"  (dropped {s['extrapolated_already_published']} already published)\n"
+           if s.get('extrapolated_already_published') else "")
     )
     if s["dry_run"]:
         print("  sample contacts:")
         for c in s.get("sample_contacts", []):
             print(f"    {c['email']:<40} {c['full_name']}  [{c['role_raw'] or '-'}]")
+        if s.get("sample_extrapolated"):
+            print("  sample EXTRAPOLATED (guessed) appointee addresses:")
+            for c in s["sample_extrapolated"]:
+                print(f"    {c['email']:<40} {c['full_name']}  [{c['role_raw'] or '-'}]  fmt={c.get('email_pattern')}")
         print()
 
 
@@ -334,6 +346,8 @@ def main():
     p_np.add_argument("--max-pages", type=int, default=0, help="cap release-list pagination")
     p_np.add_argument("--id", type=int, default=None, help="fetch+parse a single public release id (no cookie needed) — testing")
     p_np.add_argument("--dry-run", action="store_true", help="parse + report, write nothing")
+    p_np.add_argument("--no-appointments", dest="appointments", action="store_false",
+                      help="skip appointment-release name harvesting + address extrapolation")
 
     p_wp = sub.add_parser("wp-dedup", help="§2b: rule out contacts that are current/past WP/MemberPress accounts")
     p_wp.add_argument("--emails-file", default="data/wp-member-emails.txt", help="file of WP account emails, one per line")
