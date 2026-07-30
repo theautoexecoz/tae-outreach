@@ -110,9 +110,12 @@ asyncio.run(m())" > $WORK/edition.html
 python3 $POSTIE/build.py --edition $WORK/edition.html --intro $POSTIE/intro.html --out $WORK/postie-today.html
 
 # 3. select the next N prospects in priority order
+#    (GB 2026-07-30: source='goauto' rows ride regardless of confidence — their emails are
+#    format-inferred from GoAutoNews evidence, sit at export_batch=0, and bounces are expected;
+#    the dead-address flow handles misses. All other sources still require confidence='direct'.)
 docker exec tae_outreach_db psql -U tae_outreach -d tae_outreach -tAF$'\t' -c "
 SELECT id,email FROM contacts
-WHERE confidence='direct' AND disposition='in_play' AND cm_status='not_found' AND email IS NOT NULL
+WHERE (confidence='direct' OR source='goauto') AND disposition='in_play' AND cm_status='not_found' AND email IS NOT NULL
 ORDER BY export_batch ASC, id ASC LIMIT $N;" > $WORK/batch.tsv
 
 # 4. one draft per prospect; collect the ids that succeeded
