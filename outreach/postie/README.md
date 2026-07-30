@@ -119,7 +119,7 @@ ORDER BY export_batch ASC, id ASC LIMIT $N;" > $WORK/batch.tsv
 : > $WORK/ok-ids.txt
 while IFS=$'\t' read -r cid email; do
   out=$(python3 .claude/skills/mailtriage/imap_helper.py draft --account glenn \
-    --subject "A daily automotive briefing you might find useful" \
+    --subject "Today's top auto industry headlines" \
     --from "Glenn Butler <glenn@theautoexec.com>" --reply-to glenn@theautoexec.com \
     --to "$email" --html-file $WORK/postie-today.html --body-file $POSTIE/intro.txt 2>&1)
   echo "$out" | grep -q '"appended_to"' && echo "$cid" >> $WORK/ok-ids.txt
