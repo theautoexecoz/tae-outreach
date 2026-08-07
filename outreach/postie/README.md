@@ -96,6 +96,10 @@ was 15 during the reach.→glenn@ switch). From `~/Dev/taeN/tae-docs`
    is a *different* vector and stays in the send universe, but its name parser emits
    junk (`Dear Sender`, `Wednesday November`) — cosmetic only, the draft never merges
    the name, but don't trust `full_name` from that source when judging a row.
+6. **Fail closed against the Sent archive after GB approves the list and before
+   drafting.** `preflight.py` checks the independent record of what GB actually
+   sent using the stable Postie body marker, not a subject-line list. Any prior
+   match or archive-query failure blocks the whole batch.
 
 ```bash
 # 1. render the latest COMPLETED edition (status='completed', NOT max issue_number)
@@ -121,7 +125,10 @@ WHERE (confidence='direct' OR source='goauto') AND disposition='in_play'
   AND cm_status='not_found' AND sent_at IS NULL AND email IS NOT NULL
 ORDER BY export_batch ASC, id ASC LIMIT $N;" > $WORK/batch.tsv
 
-# 4. one draft per prospect; collect the ids that succeeded
+# 4. independent sent-history gate; any match or query failure aborts the run
+python3 $POSTIE/preflight.py --batch $WORK/batch.tsv
+
+# 5. one draft per prospect; collect the ids that succeeded
 : > $WORK/ok-ids.txt
 while IFS=$'\t' read -r cid email; do
   out=$(python3 .claude/skills/mailtriage/imap_helper.py draft --account glenn \
@@ -131,7 +138,7 @@ while IFS=$'\t' read -r cid email; do
   echo "$out" | grep -q '"appended_to"' && echo "$cid" >> $WORK/ok-ids.txt
 done < $WORK/batch.tsv
 
-# 5. flip exactly the drafted prospects to sent
+# 6. flip exactly the drafted prospects to sent
 docker exec tae_outreach_db psql -U tae_outreach -d tae_outreach -c \
   "UPDATE contacts SET disposition='sent', sent_at=CURRENT_DATE WHERE id IN ($(paste -sd, $WORK/ok-ids.txt)) AND disposition='in_play';"
 ```
