@@ -63,7 +63,9 @@ was 15 during the reach.→glenn@ switch). From `~/Dev/taeN/tae-docs`
    2026-07-28, confirming the 2026-07-23 airlock doctrine): delete + expunge in
    place, never move to Archive (Archive syncs into the mail-archiver and clogs
    person-search; RobotReplies is excluded from archiver sync). The mailtriage
-   `ooo-to-robotreplies` rule refills it daily.
+   `ooo-to-robotreplies` rule refills it daily. After a successful harvest, run
+   `python3 .claude/skills/mailtriage/imap_helper.py clear-robotreplies` from the
+   TAE docs repo. It is hardcoded to editor@ and this exact folder.
 
 **Selection rules (GB 2026-07-16 — apply before drafting):**
 1. **Max 2 recipients per email domain per day's batch.** Capped-out contacts stay
