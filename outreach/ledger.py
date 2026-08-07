@@ -13,8 +13,9 @@ Two jobs:
      a NON-derivable stage (bounce / complaint / unsubscribe / do-not-contact,
      set later by the send-feedback loop) are left untouched.
 
-Precedence: suppressed beats cm_status. Anything not ruled out by a derivable
-stage is (re)set to in_play.
+Precedence: suppressed beats cm_status. A row previously ruled out by a
+derivable stage is reset to in_play when that signal clears. Sent and other
+workflow dispositions are never reopened.
 """
 import logging
 
@@ -64,13 +65,14 @@ def run_ledger_refresh() -> dict:
             f"WHERE NOT suppressed AND cm_status IN ('active','unsubscribed','deleted') AND {guard}",
             (CM_REASON["active"], CM_REASON["unsubscribed"], CM_REASON["deleted"], list(DERIVABLE_STAGES)),
         ).rowcount
-        # back to in_play: not suppressed, not CM-known, and only if the current
-        # ruled-out (if any) is a derivable stage we own.
+        # Back to in_play only from a ruled_out state this refresh owns. The old
+        # `disposition <> 'in_play'` predicate also matched `sent`, reopening the
+        # Postie queue and causing duplicate sends on 6 August 2026.
         reset = conn.execute(
             "UPDATE contacts SET disposition = 'in_play', ruled_out_stage = NULL, ruled_out_reason = NULL "
-            "WHERE disposition <> 'in_play' AND NOT suppressed "
+            "WHERE disposition = 'ruled_out' AND NOT suppressed "
             "  AND (cm_status IS NULL OR cm_status = 'not_found') "
-            f"  AND {guard}",
+            "  AND ruled_out_stage = ANY(%s)",
             (list(DERIVABLE_STAGES),),
         ).rowcount
 

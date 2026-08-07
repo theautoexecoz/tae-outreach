@@ -96,7 +96,8 @@ def _target(tier_batch_i: int, ramp: list[int] | None) -> int:
 
 def run_plan_batches(ramp: list[int] | None = None, include_inferred: bool = False,
                      max_per_domain: int = DEFAULT_MAX_PER_DOMAIN) -> dict:
-    cond = ("disposition = 'in_play' AND email IS NOT NULL AND NOT suppressed "
+    cond = ("disposition = 'in_play' AND sent_at IS NULL "
+            "AND email IS NOT NULL AND NOT suppressed "
             "AND (cm_status = 'not_found' OR cm_status IS NULL)")
     if not include_inferred:
         cond += " AND confidence = 'direct'"

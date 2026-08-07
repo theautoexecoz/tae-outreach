@@ -32,8 +32,8 @@ into glenn@ Drafts, From `glenn@theautoexec.com` (GB 2026-07-20: reach. identity
 retired for direct sends at personal scale — Outlook quarantined the cold
 subdomain and replies sat unwatched; the reach. DNS/DKIM stays in place in case
 bulk volume ever revives it). Recipients: `confidence='direct' AND
-disposition='in_play' AND cm_status='not_found'`, `ORDER BY export_batch`,
-LIMIT = the day's quota; then for those N: `UPDATE contacts SET
+disposition='in_play' AND cm_status='not_found' AND sent_at IS NULL`, `ORDER BY
+export_batch`, LIMIT = the day's quota; then for those N: `UPDATE contacts SET
 disposition='sent', sent_at=CURRENT_DATE` (see migration `009_sent.sql`).
 
 ## Daily runbook (copy-paste)
@@ -117,7 +117,8 @@ python3 $POSTIE/build.py --edition $WORK/edition.html --intro $POSTIE/intro.html
 #    the dead-address flow handles misses. All other sources still require confidence='direct'.)
 docker exec tae_outreach_db psql -U tae_outreach -d tae_outreach -tAF$'\t' -c "
 SELECT id,email FROM contacts
-WHERE (confidence='direct' OR source='goauto') AND disposition='in_play' AND cm_status='not_found' AND email IS NOT NULL
+WHERE (confidence='direct' OR source='goauto') AND disposition='in_play'
+  AND cm_status='not_found' AND sent_at IS NULL AND email IS NOT NULL
 ORDER BY export_batch ASC, id ASC LIMIT $N;" > $WORK/batch.tsv
 
 # 4. one draft per prospect; collect the ids that succeeded
